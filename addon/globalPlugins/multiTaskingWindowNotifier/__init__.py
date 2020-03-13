@@ -28,10 +28,13 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 		"홈 \/ 트위터 \- Mozilla Firefox",
 		"addons"
 		]
+		beepList = [
+		523 , 587, 659, 699, 784, 880, 988, 1047
+		]
 		if obj.windowClassName == "MultitaskingViewFrame":
 			for i in range(len(appList)):
 				if obj.name == appList[i]:
-					tones.beep(650,60)
+					tones.beep(beepList[i], 100)
 		nextHandler()
 
 
