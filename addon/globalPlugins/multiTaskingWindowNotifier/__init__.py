@@ -10,6 +10,7 @@
 
 import api
 import globalPluginHandler
+import globalVars
 import tones
 import scriptHandler
 from scriptHandler import script
@@ -20,6 +21,11 @@ import ui
 
 
 class GlobalPlugin(globalPluginHandler.GlobalPlugin):
+
+	# 추가 기능 기본 변수
+	configPath = globalVars.appArgs.configPath
+	addonPath = os.path.join(configPath, "addons", "multiTaskingWindowNotifier", "globalPlugins", "multiTaskingWindowNotifier")
+
 
 	def event_gainFocus (self, obj, nextHandler):
 		obj = api.getFocusObject()
