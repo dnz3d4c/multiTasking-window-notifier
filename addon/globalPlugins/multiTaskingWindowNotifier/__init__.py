@@ -14,8 +14,8 @@ import globalVars
 import tones
 import scriptHandler
 from scriptHandler import script
+import os
 import wx
-import windowUtils
 import ui
 
 
