@@ -24,7 +24,8 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 
 	# 추가 기능 기본 변수
 	configPath = globalVars.appArgs.configPath
-	addonPath = os.path.join(configPath, "addons", "multiTaskingWindowNotifier", "globalPlugins", "multiTaskingWindowNotifier")
+	global appListFile
+	appListFile = os.path.join(configPath, "addons", "multiTaskingWindowNotifier", "globalPlugins", "multiTaskingWindowNotifier") + "\\app.list"
 
 
 	def event_gainFocus (self, obj, nextHandler):
