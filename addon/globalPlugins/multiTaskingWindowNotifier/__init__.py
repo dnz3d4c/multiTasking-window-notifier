@@ -27,6 +27,17 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 	global appListFile
 	appListFile = os.path.join(configPath, "addons", "multiTaskingWindowNotifier", "globalPlugins", "multiTaskingWindowNotifier") + "\\app.list"
 
+	# 창 목록 추가를 위한 제스처/함수
+	@script(
+	description = _("창 목록에 창 제목을 추가합니다"),
+	category = ("multiTaskingWindowNotifier"),
+	gesture = ("kb:NVDA+Shift+t")
+	)
+	def script_addListWindow(self, gesture):
+		with open(appListFile, "a", encoding="utf8") as f:
+			fg = api.getForegroundObject()
+			add = f.write(fg.name + "\n")
+		ui.message("추가됨")
 
 	def event_gainFocus (self, obj, nextHandler):
 		obj = api.getFocusObject()
