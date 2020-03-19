@@ -52,6 +52,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 				# 앱 항목과 초점 객체가 일치하면 앱 항목에 해당하는 비프음 출력
 				if obj.name == text:
 					beepList = [
+					262 , 294, 330, 349, 392, 440, 494,
 					523 , 587, 659, 699, 784, 880, 988, 1047
 					]
 					tones.beep(beepList[i], 100)
