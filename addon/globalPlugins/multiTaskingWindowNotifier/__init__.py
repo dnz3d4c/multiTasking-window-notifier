@@ -39,6 +39,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			add = f.write(fg.name + "\n")
 		ui.message("추가됨")
 
+
 	def event_gainFocus (self, obj, nextHandler):
 		obj = api.getFocusObject()
 		if obj.windowClassName == "MultitaskingViewFrame":
@@ -53,5 +54,5 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 					beepList = [
 					523 , 587, 659, 699, 784, 880, 988, 1047
 					]
-					tones.beep(beepList[i], 50)
+					tones.beep(beepList[i], 100)
 		nextHandler()
