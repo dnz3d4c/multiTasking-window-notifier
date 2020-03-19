@@ -55,5 +55,5 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 					262 , 294, 330, 349, 392, 440, 494,
 					523 , 587, 659, 699, 784, 880, 988, 1047
 					]
-					tones.beep(beepList[i], 100)
+					tones.beep(beepList[i], 100, 30, 30)
 		nextHandler()
