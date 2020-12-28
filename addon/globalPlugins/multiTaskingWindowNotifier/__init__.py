@@ -31,6 +31,9 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 
 	def __init__(self):
 		super(GlobalPlugin, self).__init__()
+		self.openAPPListFile()
+
+	def openAPPListFile (self):
 		with open(APPListFile, "r", encoding="utf8") as f:
 			global APPList
 			APPList = f.readlines()
@@ -43,14 +46,12 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 	)
 
 	def script_addListWindow(self, gesture):
-		with open(APPListFile, "r+", encoding="utf8") as f:
-			global APPList
-			APPList = f.readlines()
-			for i in range(len(APPList)):
-				text = APPList[i].strip("\n")
-				fg = api.getForegroundObject()
-				if fg.name == text:
-					ui.message("이미 추가된 항목입니다.")
+		self.openAPPListFile()
+		for i in range(len(APPList)):
+			text = APPList[i].strip("\n")
+			fg = api.getForegroundObject()
+			if fg.name == text:
+				ui.message("이미 추가된 항목입니다.")
 
 	def event_gainFocus (self, obj, nextHandler):
 		obj = api.getFocusObject()
