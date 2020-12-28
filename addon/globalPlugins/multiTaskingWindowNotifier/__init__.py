@@ -26,6 +26,14 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 	configPath = globalVars.appArgs.configPath
 	global APPListFile
 	APPListFile = os.path.join(configPath, "addons", "multiTaskingWindowNotifier", "globalPlugins", "multiTaskingWindowNotifier") + "\\app.list"
+	global APPList
+	APPList = []
+
+	def __init__(self):
+		super(GlobalPlugin, self).__init__()
+		with open(APPListFile, "r", encoding="utf8") as f:
+			global APPList
+			APPList = f.readlines()
 
 	# 창 목록 추가를 위한 제스처/함수
 	@script(
@@ -42,10 +50,8 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 	def event_gainFocus (self, obj, nextHandler):
 		obj = api.getFocusObject()
 		if obj.windowClassName == "MultitaskingViewFrame":
-			# APP 목록 파일 열기
-			with open(APPListFile, "r", encoding="utf8") as f:
-				APPList = f.readlines()
 			# 앱 목록에서 각 항목의 \N문자 제거
+			global APPList
 			for i in range(len(APPList)):
 				text = APPList[i].strip("\n")
 				# 앱 항목과 초점 객체가 일치하면 앱 항목에 해당하는 비프음 출력
