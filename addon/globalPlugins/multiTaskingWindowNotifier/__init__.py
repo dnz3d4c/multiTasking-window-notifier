@@ -41,11 +41,16 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 	category = ("multiTaskingWindowNotifier"),
 	gesture = ("kb:NVDA+Shift+t")
 	)
+
 	def script_addListWindow(self, gesture):
-		with open(APPListFile, "a", encoding="utf8") as f:
-			fg = api.getForegroundObject()
-			add = f.write(fg.name + "\n")
-		ui.message("추가됨")
+		with open(APPListFile, "r+", encoding="utf8") as f:
+			global APPList
+			APPList = f.readlines()
+			for i in range(len(APPList)):
+				text = APPList[i].strip("\n")
+				fg = api.getForegroundObject()
+				if fg.name == text:
+					ui.message("이미 추가된 항목입니다.")
 
 	def event_gainFocus (self, obj, nextHandler):
 		obj = api.getFocusObject()
