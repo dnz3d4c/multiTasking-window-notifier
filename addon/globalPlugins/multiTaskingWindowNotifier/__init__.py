@@ -39,7 +39,6 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 			add = f.write(fg.name + "\n")
 		ui.message("추가됨")
 
-
 	def event_gainFocus (self, obj, nextHandler):
 		obj = api.getFocusObject()
 		if obj.windowClassName == "MultitaskingViewFrame":
