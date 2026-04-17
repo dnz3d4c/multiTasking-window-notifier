@@ -12,6 +12,7 @@ UI는 settingsPanel.py(Phase 3)에서 별도 제공. 본 모듈은 스키마만 
 import re
 
 import config
+from logHandler import log
 
 from .constants import ADDON_NAME, MAX_ITEMS
 
@@ -82,9 +83,24 @@ def register() -> None:
 
 
 def get(key: str):
-    """설정값 조회 단축 헬퍼.
+    """설정값 조회 단축 헬퍼. 섹션/키가 누락되면 CONFSPEC default로 폴백.
+
+    정상 흐름에서는 register()가 기본값을 주입해두므로 KeyError가 날 일이 없다.
+    다만 사용자가 nvda.ini를 수동 편집하거나 프로필 전환 시 섹션이 비어 있는
+    순간 조회가 들어오면 KeyError가 터질 수 있다. 이런 경계 상황에서
+    event_gainFocus가 조용히 죽어 비프가 회귀했던 이력이 있어 방어적으로
+    CONFSPEC의 default를 반환한다.
 
     Args:
         key: CONFSPEC 키 (예: "beepDuration")
     """
-    return config.conf[ADDON_NAME][key]
+    try:
+        return config.conf[ADDON_NAME][key]
+    except KeyError:
+        # CONFSPEC에 없는 키면 ValueError/KeyError로 그대로 승격.
+        spec_str = CONFSPEC[key]
+        log.warning(
+            f"settings.get({key!r}): config.conf[{ADDON_NAME!r}]에 키/섹션 부재 "
+            f"— CONFSPEC default로 폴백"
+        )
+        return _parse_default(spec_str)
