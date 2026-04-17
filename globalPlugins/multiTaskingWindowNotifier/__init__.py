@@ -16,6 +16,7 @@ import tones
 import globalVars
 import globalPluginHandler
 from scriptHandler import script
+from logHandler import log
 
 # 번역 초기화(선택)
 try:
@@ -55,6 +56,7 @@ class AppListStore:
         except FileNotFoundError:
             items = []
         except Exception as e:
+            log.error(f"app.list 로드 실패: {path}", exc_info=True)
             ui.message(f"앱 목록을 여는 중 문제가 생겼어요: {e}")
             items = []
         return items[:MAX_ITEMS]
@@ -67,6 +69,7 @@ class AppListStore:
                 for t in items[:MAX_ITEMS]:
                     f.write(f"{t}\n")
         except Exception as e:
+            log.error(f"app.list 저장 실패: {path}", exc_info=True)
             ui.message(f"앱 목록을 저장하는 중 문제가 생겼어요: {e}")
 
 
@@ -79,6 +82,7 @@ def _getAppId(obj) -> str:
     try:
         appId = getattr(getattr(obj, "appModule", None), "appName", "") or ""
     except Exception:
+        log.debug("appModule.appName 접근 실패", exc_info=True)
         appId = ""
     if not appId:
         appId = getattr(obj, "windowClassName", "") or "unknown"
