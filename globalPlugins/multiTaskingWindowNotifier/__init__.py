@@ -20,6 +20,7 @@ from logHandler import log
 
 from .constants import ADDON_NAME, MAX_ITEMS, BEEP_TABLE
 from .appIdentity import getAppId, makeKey, splitKey
+from .appListStore import AppListStore
 
 # 번역 초기화(선택)
 try:
@@ -34,34 +35,6 @@ def _config_addon_dir() -> str:
     """사용자 설정 경로 하위의 애드온 디렉터리 경로 계산."""
     base = globalVars.appArgs.configPath
     return os.path.join(base, "addons", ADDON_NAME, "globalPlugins", ADDON_NAME)
-
-
-class AppListStore:
-    """app.list 파일 I/O 전담 유틸"""
-
-    @staticmethod
-    def load(path: str) -> list:
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                items = [line.strip() for line in f if line.strip()]
-        except FileNotFoundError:
-            items = []
-        except Exception as e:
-            log.error(f"app.list 로드 실패: {path}", exc_info=True)
-            ui.message(f"앱 목록을 여는 중 문제가 생겼어요: {e}")
-            items = []
-        return items[:MAX_ITEMS]
-
-    @staticmethod
-    def save(path: str, items: list) -> None:
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        try:
-            with open(path, "w", encoding="utf-8") as f:
-                for t in items[:MAX_ITEMS]:
-                    f.write(f"{t}\n")
-        except Exception as e:
-            log.error(f"app.list 저장 실패: {path}", exc_info=True)
-            ui.message(f"앱 목록을 저장하는 중 문제가 생겼어요: {e}")
 
 
 class AppListDialog(wx.Dialog):
