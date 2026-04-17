@@ -62,6 +62,12 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
         self.appList = appListStore.load(self.appListFile)
         self.appLookup = {}  # {key: index} 빠른 검색용
         self._rebuild_lookup()
+        # [mtwn-debug] 부팅 시 등록 목록 상태를 1회 로깅해 appLookup 비어있음/키 포맷
+        # 같은 매칭 실패 원인 추적에 사용. 실측 완료 후 제거 예정.
+        log.info(
+            f"[mtwn] boot appListFile={self.appListFile!r} "
+            f"count={len(self.appList)} keys={self.appList!r}"
+        )
         # 전환 카운트 디바운스 저장 상태
         self._lastFlushAt = time.monotonic()
         self._switchesSinceFlush = 0
@@ -242,17 +248,27 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
         try:
             o = api.getFocusObject()
             if not o:
+                # [mtwn-debug]
+                log.info("[mtwn] gainFocus focus=None, skip")
                 return
 
             # 기본값: Alt+Tab 오버레이(Windows.UI.Input.InputSite.WindowClass)에서만 동작.
             # enableAllWindows=True면 윈도우 클래스 제한 없이 모든 포커스 전환에서 비프.
             enable_all = settings.get("enableAllWindows")
-            in_alt_tab = getattr(o, "windowClassName", "") == "Windows.UI.Input.InputSite.WindowClass"
+            cls = getattr(o, "windowClassName", "")
+            in_alt_tab = cls == "Windows.UI.Input.InputSite.WindowClass"
+            # [mtwn-debug] 모든 포커스 전환에 1줄씩. 실측 완료 후 제거.
+            log.info(
+                f"[mtwn] gainFocus cls={cls!r} name={getattr(o,'name','?')!r} "
+                f"enable_all={enable_all} in_alt_tab={in_alt_tab}"
+            )
             if not (enable_all or in_alt_tab):
                 return
 
             title = (getattr(o, "name", "") or "").strip()
             if not title:
+                # [mtwn-debug]
+                log.info("[mtwn] gainFocus title empty, skip")
                 return
 
             appId = getAppId(o)
@@ -262,10 +278,18 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
             matched_key = key if key in self.appLookup else (
                 title if title in self.appLookup else None
             )
+            # [mtwn-debug] 매칭 성공/실패 모두 기록. 실측 완료 후 제거.
+            log.info(
+                f"[mtwn] match appId={appId!r} key={key!r} title={title!r} "
+                f"matched={matched_key!r} lookup_size={len(self.appLookup)}"
+            )
             if matched_key is not None:
                 idx = self.appLookup[matched_key]
                 # 같은 appId 중 몇 번째 창인지 계산해 순서에 맞는 비프음 재생
                 order = self._get_registration_order(matched_key, appId)
+                # [mtwn-debug] 비프 호출 직전. 여기까지 왔는데 소리가 안 나면
+                # play_window_beep/tones.beep 내부 문제.
+                log.info(f"[mtwn] beep idx={idx} order={order}")
                 play_window_beep(
                     idx,
                     order,
