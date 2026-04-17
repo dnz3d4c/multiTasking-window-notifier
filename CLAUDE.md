@@ -30,6 +30,37 @@
 
 **사용자가 명시적으로 "리뷰 생략"이라고 지시하면** `.claude/last-review.txt`를 touch해 Stop hook을 통과시킨다.
 
+# *중요* 빌드/설치 플로우
+
+**원칙: 수동 복사 설치 금지.** 과거 `globalPlugins/` 레벨을 한 번 빠뜨린 수동 복사로 설정 패널 미표시 + 비프 회귀가 동시에 발생한 이력 있음(`%APPDATA%\nvda\addons\<name>\`에 소스 파일이 곧장 박히고 `manifest.ini` 누락). 이후로 반드시 빌드 스크립트 경유.
+
+## 정식 설치 절차
+
+1. `uv run python build.py` — `manifest.ini` + `globalPlugins/`를 묶어 `multiTaskingWindowNotifier-<version>.nvda-addon` 생성
+2. NVDA 메뉴 → 도구 → 애드온 스토어 → "외부 파일로부터 애드온 설치" → 생성된 `.nvda-addon` 선택
+3. NVDA 재시작
+4. (필요 시) 기존 사용자 데이터 이식: `tmp_merged_app.list` 류 병합 파일을 `%APPDATA%\nvda\addons\multiTaskingWindowNotifier\globalPlugins\multiTaskingWindowNotifier\app.list`에 복사 후 NVDA 재시작 (마이그레이션은 `appListStore._load_state`가 알아서 함)
+
+## 설치 구조 검증 체크리스트
+
+NVDA 애드온 로드 오류가 의심되면 **코드보다 설치 트리를 먼저** 확인:
+
+| # | 확인 | 명령 | 정상 상태 |
+|---|------|------|-----------|
+| 1 | `manifest.ini` 존재 | `ls %APPDATA%\nvda\addons\multiTaskingWindowNotifier\manifest.ini` | 파일 있음 |
+| 2 | 플러그인 엔트리 포인트 | `ls %APPDATA%\nvda\addons\multiTaskingWindowNotifier\globalPlugins\multiTaskingWindowNotifier\__init__.py` | 파일 있음 |
+| 3 | 소스가 루트에 박혀있지 않은지 | `ls %APPDATA%\nvda\addons\multiTaskingWindowNotifier\*.py` | 결과 **없어야** 정상 |
+| 4 | 설정 섹션 생성 여부 | `grep multiTasking %APPDATA%\nvda\nvda.ini` | 섹션 헤더 보임 (애드온 최소 1회 실행 후) |
+
+3번은 "수동 복사 오타 재발" 탐지용. 설치 경로에 `__init__.py`가 루트 레벨에 있으면 즉시 깨끗이 제거하고 `.nvda-addon`으로 재설치.
+
+## 빌드 스크립트 (`build.py`) 제외 규칙
+
+- `__pycache__`, `.pytest_cache`, `.venv`, `venv`, `.git`, `tests` 디렉토리는 패키지에 포함하지 않음
+- `.pyc/.pyo/.pyd` 컴파일 산출물 제외
+- `app.list`, `app.list.bak`, `app.json`, `app.json.tmp` 런타임 사용자 데이터 제외
+- 포함 대상은 오직 `manifest.ini` + `globalPlugins/` 트리
+
 # 기본
 ## 프로그램 목적
 NVDA 스크린 리더 추가 기능으로 Alt+Tab를 눌렀을 때 여러 창을 탐색할 때 창 이름을 효과적으로 구분하기 위해 각기 다른 비프음으로 재생해 창 전환 속도를 높히기 위함.
