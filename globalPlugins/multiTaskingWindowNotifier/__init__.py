@@ -119,8 +119,24 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
             self._switchesSinceFlush = 0
 
     def _rebuild_lookup(self):
-        """appList 변경 시 검색용 딕셔너리 재구성"""
-        self.appLookup = {entry: idx for idx, entry in enumerate(self.appList)}
+        """appList 변경 시 검색용 딕셔너리 재구성.
+
+        Alt+Tab 오버레이에서 오는 포커스 객체의 appId는 실제 대상 앱이 아니라
+        Alt+Tab UI 호스트(예: `explorer`, `windowsterminal`)로 찍힌다. 따라서
+        신형 복합키(`notepad|제목 없음 - 메모장`)는 event_gainFocus 경로에서
+        정확 매치가 사실상 불가능하다 — appId 컴포넌트가 무조건 달라진다.
+
+        해결: 복합키 entry를 title 컴포넌트로도 역매핑해 두면 기존 title-only
+        fallback이 그대로 먹는다. title이 충돌하면 먼저 등록된 idx가 우선
+        (`setdefault`). 구형 entry(title == entry)는 이미 원본으로 등록됐으니
+        별도 역매핑은 skip.
+        """
+        self.appLookup = {}
+        for idx, entry in enumerate(self.appList):
+            self.appLookup[entry] = idx
+            _, title = splitKey(entry)
+            if title and title != entry:
+                self.appLookup.setdefault(title, idx)
 
     def _get_registration_order(self, key, appId):
         """
@@ -183,13 +199,16 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
             ui.message("창 제목을 확인할 수 없어요.")
             return
 
-        # 신형 키 우선 제거. 없으면 구형 제목만 항목 제거 시도.
-        # 존재 검사는 O(1) appLookup으로 수행, 실제 제거는 list.remove로 유지.
+        # 신형 키 우선 제거. 없으면 title 역매핑으로 해당 entry 인덱스를 찾아 pop.
+        # appLookup에 title이 신형 entry의 역매핑으로 등록돼 있을 수 있어서,
+        # list.remove(title)은 entry 문자열과 일치하지 않으면 ValueError. 대신
+        # 역매핑이 가리키는 idx로 pop해 안전 처리.
         original = list(self.appList)
         if key in self.appLookup:
             self.appList.remove(key)
         elif title in self.appLookup:
-            self.appList.remove(title)
+            idx = self.appLookup[title]
+            self.appList.pop(idx)
         else:
             ui.message("목록에 없는 항목이에요.")
             return
