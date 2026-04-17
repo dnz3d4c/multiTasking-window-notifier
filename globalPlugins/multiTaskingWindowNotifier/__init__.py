@@ -19,6 +19,7 @@ from scriptHandler import script
 from logHandler import log
 
 from .constants import ADDON_NAME, MAX_ITEMS, BEEP_TABLE
+from .appIdentity import getAppId, makeKey, splitKey
 
 # 번역 초기화(선택)
 try:
@@ -63,35 +64,6 @@ class AppListStore:
             ui.message(f"앱 목록을 저장하는 중 문제가 생겼어요: {e}")
 
 
-def _getAppId(obj) -> str:
-    """
-    앱 식별자 결정: 기본은 appModule.appName.
-    비어 있으면 windowClassName을 대체값으로 사용.
-    """
-    appId = ""
-    try:
-        appId = getattr(getattr(obj, "appModule", None), "appName", "") or ""
-    except Exception:
-        log.debug("appModule.appName 접근 실패", exc_info=True)
-        appId = ""
-    if not appId:
-        appId = getattr(obj, "windowClassName", "") or "unknown"
-    return appId
-
-
-def _makeKey(appId: str, title: str) -> str:
-    """저장·매칭용 복합키 생성."""
-    return f"{appId}|{title}"
-
-
-def _splitKey(entry: str):
-    """복합키 파싱. 구(제목만) 형식도 처리."""
-    if "|" in entry:
-        appId, title = entry.split("|", 1)
-        return appId, title
-    return "", entry  # 구형: 제목만
-
-
 class AppListDialog(wx.Dialog):
     """앱 목록 표시 다이얼로그"""
 
@@ -134,7 +106,7 @@ class AppListDialog(wx.Dialog):
 
     def _display_text(self, entry: str) -> str:
         """표시용 텍스트 생성"""
-        appId, title = _splitKey(entry)
+        appId, title = splitKey(entry)
         appLabel = appId if appId else "앱 미지정"
         return f"{appLabel} | {title}"
 
@@ -169,7 +141,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
         """
         order = 0
         for entry in self.appList:
-            entry_appId, _entry_title = _splitKey(entry)
+            entry_appId, _entry_title = splitKey(entry)
             if entry_appId == appId:
                 order += 1
                 if entry == key:
@@ -186,8 +158,8 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
         title = (getattr(fg, "name", "") or "").strip()
         if not title:
             return None, None, None, None
-        appId = _getAppId(fg)
-        key = _makeKey(appId, title)
+        appId = getAppId(fg)
+        key = makeKey(appId, title)
         return fg, appId, title, key
 
     # -------- 스크립트 --------
@@ -292,8 +264,8 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
         if getattr(o, "windowClassName", "") == "Windows.UI.Input.InputSite.WindowClass":
             title = (getattr(o, "name", "") or "").strip()
             if title:
-                appId = _getAppId(o)
-                key = _makeKey(appId, title)
+                appId = getAppId(o)
+                key = makeKey(appId, title)
 
                 # O(1) 딕셔너리 검색: 신형 키 우선, 없으면 구형(제목만) 시도
                 idx = self.appLookup.get(key)
