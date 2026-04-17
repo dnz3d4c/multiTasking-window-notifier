@@ -54,6 +54,14 @@ from .constants import MAX_ITEMS
 _states = {}
 
 
+def reset_cache() -> None:
+    """테스트 격리용: 모듈 전역 `_states` 캐시를 비운다.
+
+    런타임 코드는 이 함수를 호출하지 않는다. pytest autouse fixture 전용.
+    """
+    _states.clear()
+
+
 # ------------ 경로 변환 헬퍼 ------------
 
 
