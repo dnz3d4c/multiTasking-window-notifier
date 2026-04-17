@@ -8,6 +8,28 @@
 - **파일 읽기 최소화**: 이미 읽은 파일은 다시 읽지 않기. 필요한 부분만 offset/limit로 읽기
 - **병렬 작업**: 독립적인 파일 수정은 한 번에 여러 Edit 호출
 - **명확한 요청**: 사용자가 구체적으로 요청하면 불필요한 확인 단계 생략 가능
+# *중요* 구현 후 필수 리뷰
+
+`globalPlugins/**/*.py` 또는 `manifest.ini` 수정 후 "완료" 선언 전 아래 절차를 반드시 수행.
+
+1. `@NVDA Addon Development Specialist` 에이전트로 변경된 파일을 리뷰
+   - NVDA API 사용 적절성, 이벤트 훅 안정성(`event_gainFocus`는 모든 포커스 전환마다 호출됨 → 성능/예외 처리 필수)
+   - 스크린리더 접근성, 번역(`_()`) 누락, 설정(`config.conf`) 스키마 일관성
+2. 리뷰 지적사항 수정 후 재리뷰 (동일 지적 반복 방지 위해 최대 2회)
+3. 통과 시 `.claude/last-review.txt` 파일을 현재 시각으로 갱신 (Stop hook 마커)
+   - Windows bash: `date > .claude/last-review.txt`
+4. 기록 후에만 사용자에게 "완료" 응답
+
+**리뷰 강도 판단 기준**
+- "NVDA API 오용 / `nextHandler()` 누락 / 예외 미처리 / 접근성 회귀" → 반드시 수정 후 재통과
+- "경미한 스타일 / 타이핑 개선 제안" → 사용자에게 보고하고 계속 진행 가능
+
+**예외 (리뷰 생략 가능)**
+- `CLAUDE.md`, `IMPROVEMENTS.md`, `AddonDevGuide.md`, `AddonBestPractices.md`, `docs/**/*.md` 등 **문서만** 수정한 경우
+- `.claude/` 디렉터리 내 하네스 설정만 수정한 경우
+
+**사용자가 명시적으로 "리뷰 생략"이라고 지시하면** `.claude/last-review.txt`를 touch해 Stop hook을 통과시킨다.
+
 # 기본
 ## 프로그램 목적
 NVDA 스크린 리더 추가 기능으로 Alt+Tab를 눌렀을 때 여러 창을 탐색할 때 창 이름을 효과적으로 구분하기 위해 각기 다른 비프음으로 재생해 창 전환 속도를 높히기 위함.
@@ -103,11 +125,13 @@ NVDA 스크린 리더 추가 기능으로 Alt+Tab를 눌렀을 때 여러 창을
   - globalPlugins\multiTaskingWindowNotifier\__init__.py: GlobalPlugin 및 스크립트/이벤트 훅
   - globalPlugins\multiTaskingWindowNotifier\constants.py: ADDON_NAME, MAX_ITEMS, BEEP_TABLE 상수
   - globalPlugins\multiTaskingWindowNotifier\appIdentity.py: 앱 ID/창 복합키 생성·파싱 유틸
-  - globalPlugins\multiTaskingWindowNotifier\appListStore.py: app.list 파일 I/O 전담 (load/save 모듈 함수)
+  - globalPlugins\multiTaskingWindowNotifier\appListStore.py: 앱 목록 + 메타데이터 JSON 저장소 (load/save/record_switch/flush/reload/get_meta/prune_stale)
   - globalPlugins\multiTaskingWindowNotifier\windowInfo.py: 포커스 창 정보 추출 및 설정 디렉터리 헬퍼
   - globalPlugins\multiTaskingWindowNotifier\beepPlayer.py: 창 인덱스·순서 기반 비프음 재생
   - globalPlugins\multiTaskingWindowNotifier\listDialog.py: 등록 창 목록 표시용 wx.Dialog
-  - globalPlugins\multiTaskingWindowNotifier\app.list: 사용자가 저장한 앱 목록이 담긴 파일
+  - globalPlugins\multiTaskingWindowNotifier\settings.py: NVDA config 스키마 정의 및 register/get 헬퍼
+  - globalPlugins\multiTaskingWindowNotifier\settingsPanel.py: NVDA 설정 대화상자의 "창 전환 알림" 패널 (SettingsPanel 구현)
+  - globalPlugins\multiTaskingWindowNotifier\app.json: 등록된 앱·창 목록 + 메타(전환 카운트/마지막 사용 시각/등록일). 하위호환으로 `app.list`가 있으면 최초 로드 시 자동 마이그레이션 후 `app.list.bak`으로 백업
 ## *중요* 모듈 문서화 원칙
 - **새 모듈 추가 시**: 위 "주요 파일" 목록에 파일명과 역할을 한 줄로 추가
 - **형식**: `파일명.py: 간결한 역할 설명 (1줄, 핵심 기능만)`
@@ -123,11 +147,13 @@ multiTaskingWindowNotifier/
         ├── __init__.py                    # GlobalPlugin + 스크립트/이벤트 훅
         ├── constants.py                   # ADDON_NAME, MAX_ITEMS, BEEP_TABLE
         ├── appIdentity.py                 # 앱 식별/복합키 유틸
-        ├── appListStore.py                # app.list 파일 I/O
+        ├── appListStore.py                # 앱 목록 + 메타 JSON 저장소 (record_switch/flush 포함)
         ├── windowInfo.py                  # 창 정보·경로 헬퍼
         ├── beepPlayer.py                  # 비프음 재생 (wx.CallLater 기반 비동기)
         ├── listDialog.py                  # 목록 표시 wx.Dialog
-        └── app.list                       # 등록된 앱·창 제목 목록
+        ├── settings.py                    # NVDA config 스키마 (confspec)
+        ├── settingsPanel.py               # NVDA 설정 > 창 전환 알림 패널
+        └── app.json                       # 앱·창 목록 + 메타(switchCount 등). 구형 app.list는 로드 시 마이그레이션
 ```
 
 ## 기술 스택 & 핵심 모듈
@@ -142,15 +168,41 @@ multiTaskingWindowNotifier/
   - `event_gainFocus`: 창 포커스 전환 시 자동 실행
   - `windowClassName == "Windows.UI.Input.InputSite.WindowClass"` 조건에서만 비프 재생
 - **파일 저장소**
-  - `appListStore` 모듈: app.list 파일 읽기/쓰기 전담 (load/save 함수)
+  - `appListStore` 모듈: 앱 목록 + 메타 JSON I/O. 모듈 수준 캐시(`_states`)로 상태 유지, `record_switch`/`flush`로 디바운스 저장 지원.
 
 ## 데이터 포맷
-### app.list
-- **형식**: 텍스트 파일, UTF-8 인코딩
-- **구조**: 한 줄당 하나의 항목
-- **신형 포맷** (권장): `appId|창제목` (예: `notepad|제목 없음 - 메모장`)
-- **구형 포맷** (하위호환): `창제목`만 (예: `제목 없음 - 메모장`)
+### app.json (Phase 2 이후 기본)
+```json
+{
+  "version": 2,
+  "items": [
+    {"key": "notepad|제목 없음 - 메모장",
+     "appId": "notepad",
+     "title": "제목 없음 - 메모장",
+     "registeredAt": "2026-04-17T20:00:00",
+     "switchCount": 0,
+     "lastSeenAt": null}
+  ]
+}
+```
+- **인코딩**: UTF-8 (ensure_ascii=False)
+- **원자적 저장**: `.tmp` → `os.replace` 패턴
 - **최대 항목**: 64개 (MAX_ITEMS)
+- **메타 필드**
+  - `key` / `appId` / `title` — 복합키와 파생 정보
+  - `registeredAt` — 최초 등록 시각 (ISO 8601, 초 단위)
+  - `switchCount` — 해당 창으로 포커스 전환된 누적 횟수 (#2/#9 기반)
+  - `lastSeenAt` — 마지막 전환 시각 (#7 창 닫기 알림 대비)
+
+### 하위호환: app.list
+- 구형 텍스트 포맷(한 줄당 `appId|title` 또는 `title`만).
+- `app.json`이 없고 `app.list`가 있으면 `appListStore.load()`가 자동 마이그레이션.
+- 마이그레이션 완료 시 원본은 `app.list.bak`으로 이름 변경해 보존.
+
+### 디바운스 저장 규약 (`__init__.py`)
+- `event_gainFocus` 매칭 성공마다 메모리 `switchCount++`.
+- `_FLUSH_EVERY_N=10` 전환 또는 `_FLUSH_INTERVAL_SEC=30` 경과 시 `flush()` 호출.
+- `terminate()`에서 강제 flush해 재로드/종료 시 손실 방지.
 
 ## 핵심 로직
 ### 앱 식별
@@ -161,13 +213,13 @@ multiTaskingWindowNotifier/
 ### 비프음 테이블
 - `BEEP_TABLE`: 64개 주파수 (130Hz~4978Hz, 반음 단위)
 - 목록 인덱스에 따라 서로 다른 음높이 재생
-- 재생: `tones.beep(주파수, 100ms, left=30, right=30)`
+- 재생: `tones.beep(주파수, duration, left, right)` — 기본값 50ms / 좌30 / 우30 (Phase 1 이후 `config.conf`로 조정 가능)
 
 ### 등록된 단축키
 - **NVDA+Shift+T**: 현재 창 추가
 - **NVDA+Shift+D**: 현재 창 삭제
 - **NVDA+Shift+R**: 목록 파일 새로고침
-- **NVDA+Shift+I**: 등록된 모든 창 보기 (HTML 브라우저블 메시지)
+- **NVDA+Shift+I**: 등록된 모든 창 보기 (`listDialog.AppListDialog` — `wx.Dialog` 모달)
 
 ## 코딩 패턴
 - **에러 처리**: try-except로 파일 I/O 오류 처리, ui.message로 사용자에게 알림
@@ -216,7 +268,7 @@ multiTaskingWindowNotifier/
 ### 6. 비프음 커스터마이징 🎵
 - **목적**: 개인 취향/청력 맞춤
 - **방법**: 음높이 범위, 재생 시간, 좌우 밸런스 조정
-- **현재**: 130Hz~4978Hz, 100ms, left=30, right=30 고정
+- **현재**: 130Hz~4978Hz, 기본 50ms / 좌우30 (Phase 1에서 `config.conf`로 조정 가능. 테이블 자체는 고정)
 - **효과**: 더 명확한 구분, 청각 피로 감소
 
 ### 7. 창 닫기 알림 ⚠️
