@@ -17,7 +17,7 @@ from scriptHandler import script
 
 from .constants import MAX_ITEMS
 from .appIdentity import getAppId, makeKey, splitKey
-from .appListStore import AppListStore
+from . import appListStore
 from .windowInfo import config_addon_dir, get_current_window_info
 from .beepPlayer import play_window_beep
 from .listDialog import AppListDialog
@@ -40,7 +40,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
         self.appDir = config_addon_dir()
         self.appListFile = os.path.join(self.appDir, "app.list")
         # 초기 1회만 로드
-        self.appList = AppListStore.load(self.appListFile)
+        self.appList = appListStore.load(self.appListFile)
         self.appLookup = {}  # {key: index} 빠른 검색용
         self._rebuild_lookup()
 
@@ -88,7 +88,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
             return
 
         self.appList.append(key)
-        AppListStore.save(self.appListFile, self.appList)
+        appListStore.save(self.appListFile, self.appList)
         self._rebuild_lookup()
         ui.message(f"추가했어요: {appId} | {title}")
 
@@ -116,7 +116,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
             ui.message("목록에 없는 항목이에요.")
             return
 
-        AppListStore.save(self.appListFile, self.appList)
+        appListStore.save(self.appListFile, self.appList)
         self._rebuild_lookup()
         ui.message("목록에서 삭제했어요.")
 
@@ -126,7 +126,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
         gesture="kb:NVDA+shift+r",
     )
     def script_reloadAppList(self, gesture=None):
-        items = AppListStore.load(self.appListFile)
+        items = appListStore.load(self.appListFile)
         self.appList = items
         self._rebuild_lookup()
         ui.message(f"목록을 다시 불러왔어요. 지금 {len(items)}개예요.")
