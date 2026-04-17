@@ -11,3 +11,8 @@ Thumbs.db
 
 # Claude Code hook runtime state (세션별로 달라짐, 공유 X)
 .claude/hook-state.json
+
+# 로컬 복구/백업 산출물 (커밋 대상 아님)
+backup_installed_addon_*.zip
+tmp_merged_app.list
+*.nvda-addon
