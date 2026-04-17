@@ -18,12 +18,12 @@ import globalPluginHandler
 from logHandler import log
 from scriptHandler import script
 
-from .constants import ADDON_NAME, MAX_ITEMS
-from .appIdentity import getAppId, makeKey, splitKey
+from .constants import ADDON_NAME, MAX_ITEMS, SCOPE_APP, SCOPE_WINDOW
+from .appIdentity import getAppId, makeKey, makeAppKey, splitKey
 from . import appListStore
 from . import settings
 from .windowInfo import config_addon_dir, get_current_window_info
-from .beepPlayer import play_window_beep
+from .beepPlayer import play_beep
 from .listDialog import AppListDialog
 from .settingsPanel import MultiTaskingSettingsPanel
 
@@ -44,6 +44,11 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
     _FLUSH_INTERVAL_SEC = 30
     _FLUSH_EVERY_N = 10
 
+    # 매칭 중복 억제 윈도우(초). 같은 탭 안에서 자식 컨트롤(예: 메모장 RichEditD2DPT)
+    # 로 gainFocus가 다중 발동해도 매칭 1회만. 너무 길면 의도적 빠른 재진입을 놓치고,
+    # 너무 짧으면 중복 비프가 들리므로 0.3s로 시작.
+    _MATCH_DEDUP_SEC = 0.3
+
     def __init__(self):
         super().__init__()
         # 설정 스키마 등록 + 설정 대화상자 패널 등록은 하나의 원자적 묶음으로 처리.
@@ -61,11 +66,19 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
         self.appListFile = os.path.join(self.appDir, "app.list")
         # 초기 1회만 로드
         self.appList = appListStore.load(self.appListFile)
-        self.appLookup = {}  # {key: index} 빠른 검색용
+        # scope=window 매칭용 사전: 복합키(appId|title)와 title-only 역매핑 모두 보유.
+        # title-only 역매핑은 Alt+Tab 오버레이 케이스에서 obj의 appId가 explorer 등으로
+        # 찍혀 신형 키 매칭이 깨질 때 fallback으로 쓰인다.
+        self.windowLookup = {}
+        # scope=app 매칭용 사전: appId만 키로. windowLookup이 모두 미스일 때 fallback.
+        self.appLookup = {}
         self._rebuild_lookup()
         # 전환 카운트 디바운스 저장 상태
         self._lastFlushAt = time.monotonic()
         self._switchesSinceFlush = 0
+        # 매칭 중복 억제 상태
+        self._last_matched_key = None
+        self._last_matched_ts = 0.0
 
         # 손상된 app.json을 만났을 때 한 번만 사용자에게 안내.
         # ui.delayedMessage는 부팅 시 UI 변화에 묻히지 않도록 NVDA가 제공하는
@@ -107,46 +120,140 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
             self._lastFlushAt = now
             self._switchesSinceFlush = 0
 
+    def _meta_for(self, entry):
+        """디스크 메타에서 scope를 조회. 메타 없으면 기본 SCOPE_WINDOW로 간주.
+
+        appListStore가 아직 로드 안 됐거나(부팅 직후) entry가 막 추가되어 메타가
+        없을 수 있다. 그런 케이스에서도 안전하게 동작하도록 fallback.
+        """
+        meta = appListStore.get_meta(self.appListFile, entry) or {}
+        return meta.get("scope", SCOPE_WINDOW)
+
     def _rebuild_lookup(self):
         """appList 변경 시 검색용 딕셔너리 재구성.
 
-        Alt+Tab 오버레이에서 오는 포커스 객체의 appId는 실제 대상 앱이 아니라
-        Alt+Tab UI 호스트(예: `explorer`, `windowsterminal`)로 찍힌다. 따라서
-        신형 복합키(`notepad|제목 없음 - 메모장`)는 event_gainFocus 경로에서
-        정확 매치가 사실상 불가능하다 — appId 컴포넌트가 무조건 달라진다.
-
-        해결: 복합키 entry를 title 컴포넌트로도 역매핑해 두면 기존 title-only
-        fallback이 그대로 먹는다. title이 충돌하면 먼저 등록된 idx가 우선
-        (`setdefault`). 구형 entry(title == entry)는 이미 원본으로 등록됐으니
-        별도 역매핑은 skip.
+        windowLookup:
+            - 복합키(`appId|title`) → idx
+            - title-only 역매핑 → idx (Alt+Tab 오버레이에서 obj.appId가 explorer로
+              찍혀 정확 매치가 깨질 때 fallback)
+            - 구형 entry(title == entry, '|' 없음)는 자기 자신이 그대로 등록되어
+              자동 fallback 역할
+            - title 충돌 시 먼저 등록된 idx 우선 (`setdefault`)
+        appLookup:
+            - appId → idx (scope=app entry만)
+            - windowLookup이 모두 미스일 때 마지막 fallback. 매칭 우선순위 창 > 앱.
         """
+        self.windowLookup = {}
         self.appLookup = {}
         for idx, entry in enumerate(self.appList):
-            self.appLookup[entry] = idx
+            scope = self._meta_for(entry)
+            if scope == SCOPE_APP:
+                # appId 자체가 key
+                self.appLookup.setdefault(entry, idx)
+                continue
+            # SCOPE_WINDOW
+            self.windowLookup[entry] = idx
             _, title = splitKey(entry)
             if title and title != entry:
-                self.appLookup.setdefault(title, idx)
+                self.windowLookup.setdefault(title, idx)
         log.debug(
             f"mtwn: _rebuild_lookup entries={len(self.appList)} "
-            f"lookup_keys={len(self.appLookup)}"
+            f"window_keys={len(self.windowLookup)} app_keys={len(self.appLookup)}"
         )
 
     def _get_registration_order(self, key, appId):
-        """
-        같은 appId를 가진 항목들 중에서 현재 키가 몇 번째로 등록되었는지 반환
+        """같은 appId를 가진 SCOPE_WINDOW 항목 중 key의 등록 순서(1부터).
 
-        @param key: 현재 창의 복합키 (appId|title)
-        @param appId: 앱 식별자
-        @return: 등록 순서 (1부터 시작)
+        scope=app 항목은 카운트에 포함하지 않음 — 앱 entry는 "기준 주파수" 역할만
+        하고 비프 변주 순서(order)는 창 entry끼리만 셈한다. 같은 appId의 첫 번째
+        창 entry가 order=1, 두 번째가 2, ...
         """
         order = 0
         for entry in self.appList:
+            if self._meta_for(entry) != SCOPE_WINDOW:
+                continue
             entry_appId, _entry_title = splitKey(entry)
             if entry_appId == appId:
                 order += 1
                 if entry == key:
                     return order
         return 1  # 기본값
+
+    def _resolve_beep_params(self, matched_key, scope, appId):
+        """비프 base_idx와 order 결정.
+
+        - scope=app: base_idx=app entry의 idx, order=1 (반음 변주 없음)
+        - scope=window:
+            * 동일 appId의 app entry가 있으면 base_idx=app entry의 idx,
+              order=같은 appId 창 entry 등록 순서 (앱 기준음에서 반음씩 위로)
+            * app entry 없으면 base_idx=같은 appId 첫 창 entry idx,
+              order=등록 순서. 결과적으로 첫 창은 그 idx의 기본음.
+        """
+        if scope == SCOPE_APP:
+            base_idx = self.appLookup.get(matched_key, 0)
+            return base_idx, 1
+        # SCOPE_WINDOW
+        # app entry 있으면 그 idx를 기준음으로
+        app_idx = self.appLookup.get(appId)
+        if app_idx is not None:
+            base_idx = app_idx
+        else:
+            # 같은 appId의 첫 SCOPE_WINDOW entry idx
+            base_idx = self.windowLookup.get(matched_key, 0)
+            for entry_idx, entry in enumerate(self.appList):
+                if self._meta_for(entry) != SCOPE_WINDOW:
+                    continue
+                ea, _ = splitKey(entry)
+                if ea == appId:
+                    base_idx = entry_idx
+                    break
+        order = self._get_registration_order(matched_key, appId)
+        return base_idx, order
+
+    def _match_and_beep(self, appId, title):
+        """공통 매칭 루틴. event_gainFocus가 매칭 소스를 결정한 뒤 호출.
+
+        매칭 우선순위:
+            1. windowLookup 정확 매치 (key=appId|title) → 창 비프
+            2. windowLookup title-only 역매핑 → 창 비프 (Alt+Tab 오버레이 호환)
+            3. appLookup (appId) → 앱 비프
+            4. 미스 → no-op
+        """
+        key = makeKey(appId, title)
+
+        # 중복 매칭 가드
+        now = time.monotonic()
+        if (key == self._last_matched_key
+                and now - self._last_matched_ts < self._MATCH_DEDUP_SEC):
+            return
+
+        matched_key = None
+        scope = None
+        if key in self.windowLookup:
+            matched_key, scope = key, SCOPE_WINDOW
+        elif title in self.windowLookup:
+            # title 역매핑 → 실제 entry 문자열로 변환 (record_switch는 entry 키가 필요)
+            idx = self.windowLookup[title]
+            matched_key, scope = self.appList[idx], SCOPE_WINDOW
+        elif appId in self.appLookup:
+            matched_key, scope = appId, SCOPE_APP
+
+        if matched_key is None:
+            return
+
+        self._last_matched_key = key
+        self._last_matched_ts = now
+
+        base_idx, order = self._resolve_beep_params(matched_key, scope, appId)
+        play_beep(
+            base_idx, order, scope,
+            duration=settings.get("beepDuration"),
+            left=settings.get("beepVolumeLeft"),
+            right=settings.get("beepVolumeRight"),
+        )
+        appListStore.record_switch(self.appListFile, matched_key)
+        self._switchesSinceFlush += 1
+        self._maybe_flush_switches()
 
     # -------- 스크립트 --------
     # 기본 제스처는 데코레이터 gesture 파라미터로 선언
@@ -157,15 +264,57 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
         gesture="kb:NVDA+shift+t",
     )
     def script_addCurrentWindowTitle(self, gesture=None):
+        # 등록 소스는 foreground (메모장처럼 자식 컨트롤이 focus를 받아도 활성 탭 제목 취득).
         fg, appId, title, key = get_current_window_info()
         if not title:
             ui.message("창 제목을 확인할 수 없어요.", speechPriority=speech.Spri.NEXT)
             return
 
-        # 중복 체크: 신형 키 또는 구형 제목만 항목 모두 고려 (O(1) 딕셔너리 조회)
-        if key in self.appLookup or title in self.appLookup:
-            ui.message("이미 목록에 있어요.", speechPriority=speech.Spri.NEXT)
-            return
+        # scope 선택 다이얼로그를 GUI 스레드에서 띄우고 결과를 콜백으로 처리.
+        # wx.SingleChoiceDialog는 키보드/스크린리더 친화적이며 기본 포커스가
+        # 첫 항목("이 창만")이라 Enter 한 번으로 기존 동작 재현 가능.
+        choices = [
+            _("이 창만 (%(app)s | %(title)s)") % {"app": appId, "title": title},
+            _("이 앱 전체 (%s)") % appId,
+        ]
+
+        def show_choice():
+            # 모달 종료 후 같은 GUI 스레드에서 즉시 _do_add 호출.
+            # CallAfter 이중으로 큐에 쌓아 음성 순서가 큐 깊이에 따라 바뀌는 것을 방지.
+            gui.mainFrame.prePopup()
+            dlg = wx.SingleChoiceDialog(
+                gui.mainFrame,
+                _("등록 범위를 선택하세요."),
+                _("창 전환 알림 — 항목 추가"),
+                choices,
+            )
+            dlg.SetSelection(0)
+            selected_scope = None
+            try:
+                if dlg.ShowModal() == wx.ID_OK:
+                    selected_scope = SCOPE_WINDOW if dlg.GetSelection() == 0 else SCOPE_APP
+            finally:
+                dlg.Destroy()
+                gui.mainFrame.postPopup()
+            if selected_scope is not None:
+                self._do_add(appId, title, key, selected_scope)
+
+        wx.CallAfter(show_choice)
+
+    def _do_add(self, appId, title, key, scope):
+        """scope 선택 후 실제 등록. GUI 스레드에서 호출."""
+        # 중복 체크: scope별로 나뉘므로 같은 appId여도 창 등록과 앱 등록은 공존 허용.
+        if scope == SCOPE_WINDOW:
+            if key in self.windowLookup:
+                ui.message("이미 목록에 있어요.", speechPriority=speech.Spri.NEXT)
+                return
+            new_key = key
+        else:  # SCOPE_APP
+            if appId in self.appLookup:
+                ui.message("이미 목록에 있어요.", speechPriority=speech.Spri.NEXT)
+                return
+            new_key = makeAppKey(appId)
+
         # 사용자 설정 상한과 하드 상한(BEEP_TABLE 길이) 중 작은 값을 적용
         effective_max = min(settings.get("maxItems"), MAX_ITEMS)
         if len(self.appList) >= effective_max:
@@ -175,9 +324,8 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
             )
             return
 
-        self.appList.append(key)
-        if not appListStore.save(self.appListFile, self.appList):
-            # 저장 실패 → 메모리 롤백 후 사용자 안내
+        self.appList.append(new_key)
+        if not appListStore.save(self.appListFile, self.appList, scopes={new_key: scope}):
             self.appList.pop()
             ui.message(
                 "앱 목록을 저장하는 중 문제가 생겼어요. 다시 시도해 주세요.",
@@ -185,8 +333,11 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
             )
             return
         self._rebuild_lookup()
-        ui.message(f"추가했어요: {appId} | {title}", speechPriority=speech.Spri.NEXT)
-        log.info(f"mtwn: add succeeded key={key!r} total={len(self.appList)}")
+        if scope == SCOPE_APP:
+            ui.message(f"앱 전체로 추가했어요: {appId}", speechPriority=speech.Spri.NEXT)
+        else:
+            ui.message(f"창으로 추가했어요: {appId} | {title}", speechPriority=speech.Spri.NEXT)
+        log.info(f"mtwn: add succeeded scope={scope!r} key={new_key!r} total={len(self.appList)}")
 
     @script(
         description=_("Remove current window title from notifier list"),
@@ -194,27 +345,30 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
         gesture="kb:NVDA+shift+d",
     )
     def script_removeCurrentWindowTitle(self, gesture=None):
+        # 삭제 소스도 foreground (메모장 자식 컨트롤 케이스 대응).
         fg, appId, title, key = get_current_window_info()
         if not title:
             ui.message("창 제목을 확인할 수 없어요.", speechPriority=speech.Spri.NEXT)
             return
 
-        # 신형 키 우선 제거. 없으면 title 역매핑으로 해당 entry 인덱스를 찾아 pop.
-        # appLookup에 title이 신형 entry의 역매핑으로 등록돼 있을 수 있어서,
-        # list.remove(title)은 entry 문자열과 일치하지 않으면 ValueError. 대신
-        # 역매핑이 가리키는 idx로 pop해 안전 처리.
+        # 우선순위 창 > 앱. 무엇을 지웠는지 음성으로 명확히 알려줌.
+        # title-only fallback은 일부러 사용하지 않음 — 다른 앱의 동일 title 창을
+        # 의도와 다르게 지울 위험. 매칭(_match_and_beep)에선 fallback이 유용하지만
+        # 삭제는 정확 매치만 허용한다. 앱 entry 삭제 시 같은 appId 창 entry는
+        # 그대로 둠 (안전 원칙. 일괄 삭제는 목록 다이얼로그에서 명시적으로 가능).
         original = list(self.appList)
-        if key in self.appLookup:
+        removed_scope = None
+        if key in self.windowLookup:
             self.appList.remove(key)
-        elif title in self.appLookup:
-            idx = self.appLookup[title]
-            self.appList.pop(idx)
+            removed_scope = SCOPE_WINDOW
+        elif appId in self.appLookup:
+            self.appList.remove(appId)
+            removed_scope = SCOPE_APP
         else:
             ui.message("목록에 없는 항목이에요.", speechPriority=speech.Spri.NEXT)
             return
 
         if not appListStore.save(self.appListFile, self.appList):
-            # 저장 실패 → 메모리 롤백 후 사용자 안내
             self.appList = original
             ui.message(
                 "앱 목록을 저장하는 중 문제가 생겼어요. 다시 시도해 주세요.",
@@ -222,8 +376,11 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
             )
             return
         self._rebuild_lookup()
-        ui.message("목록에서 삭제했어요.", speechPriority=speech.Spri.NEXT)
-        log.info(f"mtwn: remove succeeded total={len(self.appList)}")
+        if removed_scope == SCOPE_APP:
+            ui.message("앱 전체에서 삭제했어요.", speechPriority=speech.Spri.NEXT)
+        else:
+            ui.message("창에서 삭제했어요.", speechPriority=speech.Spri.NEXT)
+        log.info(f"mtwn: remove succeeded scope={removed_scope!r} total={len(self.appList)}")
 
     @script(
         description=_("Reload app list from disk"),
@@ -254,20 +411,43 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
             ui.message("등록된 창이 없어요.", speechPriority=speech.Spri.NEXT)
             return
 
-        # wxPython 다이얼로그 표시 (GUI 스레드에서 실행)
         def show_dialog():
             gui.mainFrame.prePopup()
-            dlg = AppListDialog(gui.mainFrame, self.appList)
+            dlg = AppListDialog(
+                gui.mainFrame,
+                self.appList,
+                get_scope=self._meta_for,
+                on_delete=self._delete_entries_from_dialog,
+            )
             dlg.ShowModal()
             dlg.Destroy()
             gui.mainFrame.postPopup()
 
         wx.CallAfter(show_dialog)
-        # 간단 음성 요약
         ui.message(
             f"총 {len(self.appList)}개를 표시했어요.",
             speechPriority=speech.Spri.NEXT,
         )
+
+    def _delete_entries_from_dialog(self, entries) -> bool:
+        """목록 다이얼로그에서 일괄 삭제 호출 시 진행. 저장 성공 여부 반환.
+
+        에러 알림은 listDialog 측 wx.MessageBox로 통일 (이중 알림 방지).
+        성공 시 _rebuild_lookup + 음성 안내.
+        """
+        if not entries:
+            return True
+        new_list = [e for e in self.appList if e not in entries]
+        if not appListStore.save(self.appListFile, new_list):
+            return False
+        self.appList = new_list
+        self._rebuild_lookup()
+        ui.message(
+            f"{len(entries)}개 항목을 목록에서 삭제했어요.",
+            speechPriority=speech.Spri.NEXT,
+        )
+        log.info(f"mtwn: dialog bulk delete count={len(entries)} total={len(self.appList)}")
+        return True
 
     # -------- 이벤트 훅 --------
 
@@ -276,44 +456,30 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
         # event_gainFocus는 모든 포커스 전환마다 호출되므로, 본 애드온 예외가
         # NVDA 이벤트 체인을 끊지 않도록 try/except + finally로 nextHandler() 보장.
         try:
-            o = api.getFocusObject()
-            if not o:
+            if obj is None:
                 return
 
-            # 기본값: Alt+Tab 오버레이(Windows.UI.Input.InputSite.WindowClass)에서만 동작.
-            # enableAllWindows=True면 윈도우 클래스 제한 없이 모든 포커스 전환에서 비프.
+            in_alt_tab = getattr(obj, "windowClassName", "") == "Windows.UI.Input.InputSite.WindowClass"
             enable_all = settings.get("enableAllWindows")
-            in_alt_tab = getattr(o, "windowClassName", "") == "Windows.UI.Input.InputSite.WindowClass"
             if not (enable_all or in_alt_tab):
                 return
 
-            title = (getattr(o, "name", "") or "").strip()
+            # 매칭 소스 결정 (Phase 1 실측 결과 반영):
+            #   - Alt+Tab 오버레이(Windows.UI.Input.InputSite.WindowClass): obj 자신이
+            #     "선택 후보 창" 정보를 들고 있고, fg는 오버레이 자체라 부적합.
+            #   - 그 외(enableAllWindows=True): 메모장처럼 자식 컨트롤(RichEditD2DPT)이
+            #     focus를 받는 케이스가 있어 fg(=top-level foreground)에서 활성 탭
+            #     제목/appId를 얻어야 한다. fg가 None이면 obj로 폴백.
+            if in_alt_tab:
+                src = obj
+            else:
+                src = api.getForegroundObject() or obj
+
+            title = (getattr(src, "name", "") or "").strip()
             if not title:
                 return
-
-            appId = getAppId(o)
-            key = makeKey(appId, title)
-
-            # O(1) 딕셔너리 검색: 신형 키 우선, 없으면 title 역매핑 시도
-            # (_rebuild_lookup이 복합키 entry의 title 컴포넌트도 역매핑해둠).
-            matched_key = key if key in self.appLookup else (
-                title if title in self.appLookup else None
-            )
-            if matched_key is not None:
-                idx = self.appLookup[matched_key]
-                # 같은 appId 중 몇 번째 창인지 계산해 순서에 맞는 비프음 재생
-                order = self._get_registration_order(matched_key, appId)
-                play_window_beep(
-                    idx,
-                    order,
-                    duration=settings.get("beepDuration"),
-                    left=settings.get("beepVolumeLeft"),
-                    right=settings.get("beepVolumeRight"),
-                )
-                # 전환 메타 기록 + 디바운스 저장
-                appListStore.record_switch(self.appListFile, matched_key)
-                self._switchesSinceFlush += 1
-                self._maybe_flush_switches()
+            appId = getAppId(src)
+            self._match_and_beep(appId, title)
         except Exception:
             log.exception("mtwn: event_gainFocus failed")
         finally:

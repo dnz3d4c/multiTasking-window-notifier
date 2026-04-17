@@ -46,20 +46,22 @@ def plugin(monkeypatch, tmp_path):
 
 
 def test_composite_entry_title_is_reverse_mapped(plugin):
-    """복합키 entry의 title 컴포넌트가 lookup에 같은 idx로 추가된다."""
+    """복합키 entry의 title 컴포넌트가 windowLookup에 같은 idx로 추가된다."""
     plugin.appList = ["notepad|제목 없음 - 메모장"]
     plugin._rebuild_lookup()
 
-    assert plugin.appLookup["notepad|제목 없음 - 메모장"] == 0
-    assert plugin.appLookup["제목 없음 - 메모장"] == 0
+    assert plugin.windowLookup["notepad|제목 없음 - 메모장"] == 0
+    assert plugin.windowLookup["제목 없음 - 메모장"] == 0
+    # 메타 미주입 상태에서는 SCOPE_WINDOW로 fallback → appLookup은 비어있음
+    assert plugin.appLookup == {}
 
 
 def test_legacy_entry_creates_single_mapping(plugin):
-    """구형 title-only entry는 역매핑 중복 없이 한 번만 lookup에 등록된다."""
+    """구형 title-only entry는 역매핑 중복 없이 한 번만 windowLookup에 등록된다."""
     plugin.appList = ["Steam"]
     plugin._rebuild_lookup()
 
-    assert plugin.appLookup == {"Steam": 0}
+    assert plugin.windowLookup == {"Steam": 0}
 
 
 def test_title_collision_keeps_first_registered(plugin):
@@ -70,10 +72,10 @@ def test_title_collision_keeps_first_registered(plugin):
     ]
     plugin._rebuild_lookup()
 
-    assert plugin.appLookup["notepad|제목 없음 - 메모장"] == 0
-    assert plugin.appLookup["otherapp|제목 없음 - 메모장"] == 1
+    assert plugin.windowLookup["notepad|제목 없음 - 메모장"] == 0
+    assert plugin.windowLookup["otherapp|제목 없음 - 메모장"] == 1
     # title 역매핑은 setdefault로 먼저 등록된 idx 유지
-    assert plugin.appLookup["제목 없음 - 메모장"] == 0
+    assert plugin.windowLookup["제목 없음 - 메모장"] == 0
 
 
 def test_alt_tab_overlay_triggers_beep_via_title_fallback(plugin, monkeypatch):
@@ -100,11 +102,12 @@ def test_alt_tab_overlay_triggers_beep_via_title_fallback(plugin, monkeypatch):
 
     called = []
 
-    def fake_beep(idx, order, **kwargs):
-        called.append((idx, order))
+    def fake_beep(base_idx, order, scope, **kwargs):
+        called.append((base_idx, order, scope))
 
-    monkeypatch.setattr(pkg, "play_window_beep", fake_beep)
+    monkeypatch.setattr(pkg, "play_beep", fake_beep)
 
     plugin.event_gainFocus(focus, lambda: None)
 
-    assert called == [(0, 1)], f"비프 호출 누락: got={called}"
+    # base_idx=0(첫 번째 SCOPE_WINDOW entry), order=1, scope=window
+    assert called == [(0, 1, "window")], f"비프 호출 누락: got={called}"
