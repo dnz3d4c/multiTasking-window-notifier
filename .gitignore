@@ -8,3 +8,6 @@ __pycache__/
 venv/
 .DS_Store
 Thumbs.db
+
+# Claude Code hook runtime state (세션별로 달라짐, 공유 X)
+.claude/hook-state.json
