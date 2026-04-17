@@ -12,15 +12,15 @@ import wx
 import api
 import ui
 import gui
-import tones
 import globalPluginHandler
 from scriptHandler import script
 from logHandler import log
 
-from .constants import MAX_ITEMS, BEEP_TABLE
+from .constants import MAX_ITEMS
 from .appIdentity import getAppId, makeKey, splitKey
 from .appListStore import AppListStore
 from .windowInfo import config_addon_dir, get_current_window_info
+from .beepPlayer import play_window_beep
 
 # 번역 초기화(선택)
 try:
@@ -225,21 +225,9 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
                 if idx is None:
                     idx = self.appLookup.get(title)  # 하위호환
 
-                if idx is not None and 0 <= idx < len(BEEP_TABLE):
-                    base_freq = BEEP_TABLE[idx]
-
-                    # 등록 순서 계산 (같은 appId 중 몇 번째?)
+                if idx is not None:
+                    # 같은 appId 중 몇 번째 창인지 계산해 순서에 맞는 비프음 재생
                     order = self._get_registration_order(key, appId)
-
-                    # 기본음 재생 (짧게 50ms)
-                    tones.beep(base_freq, 50, 30, 30)
-
-                    # 2번째 이상이면 순서에 해당하는 높은 음을 wx.CallLater로 지연 재생
-                    # (메인 스레드 블로킹 방지)
-                    if order > 1:
-                        # 반음 = 2^(1/12) ≈ 1.059463
-                        # order번째 = (order-1)반음 높게
-                        higher_freq = int(base_freq * (1.059463 ** (order - 1)))
-                        wx.CallLater(10, tones.beep, higher_freq, 50, 30, 30)
+                    play_window_beep(idx, order)
 
         nextHandler()
