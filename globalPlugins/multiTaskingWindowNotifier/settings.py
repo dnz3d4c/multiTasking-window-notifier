@@ -26,8 +26,8 @@ from .constants import ADDON_NAME, MAX_ITEMS
 #                      기본 False → Alt+Tab 오버레이(Windows.UI.Input.InputSite.WindowClass)에서만 동작.
 CONFSPEC = {
     "beepDuration": "integer(default=50, min=20, max=500)",
-    "beepVolumeLeft": "integer(default=30, min=0, max=100)",
-    "beepVolumeRight": "integer(default=30, min=0, max=100)",
+    "beepVolumeLeft": "integer(default=50, min=0, max=100)",
+    "beepVolumeRight": "integer(default=50, min=0, max=100)",
     "maxItems": f"integer(default={MAX_ITEMS}, min=1, max={MAX_ITEMS})",
     "enableAllWindows": "boolean(default=False)",
 }

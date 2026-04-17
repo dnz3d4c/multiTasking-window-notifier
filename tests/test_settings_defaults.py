@@ -55,8 +55,8 @@ def test_register_creates_section_and_fills_defaults(real_config):
     assert ADDON_KEY in real_config
     section = real_config[ADDON_KEY]
     assert section["beepDuration"] == 50
-    assert section["beepVolumeLeft"] == 30
-    assert section["beepVolumeRight"] == 30
+    assert section["beepVolumeLeft"] == 50
+    assert section["beepVolumeRight"] == 50
     assert section["enableAllWindows"] is False
     assert section["maxItems"] == 64
 
@@ -96,4 +96,4 @@ def test_get_fallback_when_key_missing(real_config):
     del real_config[ADDON_KEY]["beepVolumeLeft"]
 
     # 키만 빠진 상황에서도 폴백이 동작해야 event_gainFocus가 안 죽는다
-    assert settings.get("beepVolumeLeft") == 30
+    assert settings.get("beepVolumeLeft") == 50

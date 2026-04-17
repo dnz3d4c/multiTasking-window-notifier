@@ -16,8 +16,8 @@ SEMITONE_RATIO = 1.059463
 # config가 미주입되거나 테스트 환경일 때 사용할 기본값.
 # 실제 런타임 값은 __init__.py에서 config.conf로 읽어 전달.
 BEEP_DURATION_MS = 50
-BEEP_LEFT_VOL = 30
-BEEP_RIGHT_VOL = 30
+BEEP_LEFT_VOL = 50
+BEEP_RIGHT_VOL = 50
 
 # 같은 앱의 2번째 창 비프 지연 (ms)
 SECONDARY_BEEP_DELAY_MS = 10
