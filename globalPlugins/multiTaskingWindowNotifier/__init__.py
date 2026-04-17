@@ -8,19 +8,23 @@
 #   ※ 위 두 항목은 아직 미구현. 구조 영향 적음. 추후 필요 시 추가.
 
 import os
+import time
 import wx
 import api
 import ui
 import gui
 import globalPluginHandler
+from logHandler import log
 from scriptHandler import script
 
-from .constants import MAX_ITEMS
+from .constants import ADDON_NAME, MAX_ITEMS
 from .appIdentity import getAppId, makeKey, splitKey
 from . import appListStore
+from . import settings
 from .windowInfo import config_addon_dir, get_current_window_info
 from .beepPlayer import play_window_beep
 from .listDialog import AppListDialog
+from .settingsPanel import MultiTaskingSettingsPanel
 
 # 번역 초기화(선택)
 try:
@@ -35,14 +39,78 @@ except Exception:
 class GlobalPlugin(globalPluginHandler.GlobalPlugin):
     """전역 플러그인: 지정한 창(appName|제목)에 포커스가 오면 비프음 알림"""
 
+    # 전환 카운트 디바운스 저장 임계치
+    _FLUSH_INTERVAL_SEC = 30
+    _FLUSH_EVERY_N = 10
+
     def __init__(self):
         super().__init__()
+        # 설정 스키마 등록 + 설정 대화상자 패널 등록은 하나의 원자적 묶음으로 처리.
+        # 한쪽만 성공하면 다른 쪽이 KeyError를 유발(패널이 등록됐는데 스키마 없음 등).
+        # in 체크로 재로드 시 고아 엔트리로 인한 중복 등록도 방어.
+        try:
+            settings.register()
+            category_classes = gui.settingsDialogs.NVDASettingsDialog.categoryClasses
+            if MultiTaskingSettingsPanel not in category_classes:
+                category_classes.append(MultiTaskingSettingsPanel)
+        except Exception:
+            log.exception("multiTaskingWindowNotifier 설정 시스템 초기화 실패")
+
         self.appDir = config_addon_dir()
         self.appListFile = os.path.join(self.appDir, "app.list")
         # 초기 1회만 로드
         self.appList = appListStore.load(self.appListFile)
         self.appLookup = {}  # {key: index} 빠른 검색용
         self._rebuild_lookup()
+        # 전환 카운트 디바운스 저장 상태
+        self._lastFlushAt = time.monotonic()
+        self._switchesSinceFlush = 0
+
+        # 손상된 app.json을 만났을 때 한 번만 사용자에게 지연 안내.
+        # wx.CallLater 인스턴스를 self 속성에 보관해 GC 위험 차단 + terminate에서 정리.
+        self._corruptionAlertTimer = None
+        if appListStore.is_corrupted(self.appListFile):
+            self._corruptionAlertTimer = wx.CallLater(
+                3000,
+                ui.message,
+                "앱 목록 파일이 손상되어 빈 상태로 시작했어요. "
+                "이전 목록은 자동 복구되지 않으니 필요하면 백업을 확인해 주세요.",
+            )
+
+    def terminate(self):
+        """애드온 재로드/NVDA 종료 시 미저장 변경분 저장 + 설정 패널 해제."""
+        try:
+            appListStore.flush(self.appListFile)
+        except Exception:
+            log.exception("multiTaskingWindowNotifier terminate flush")
+        # 지연 안내 타이머가 아직 대기 중이면 취소해 잔류 콜백 방지.
+        try:
+            if self._corruptionAlertTimer is not None and self._corruptionAlertTimer.IsRunning():
+                self._corruptionAlertTimer.Stop()
+        except Exception:
+            log.exception("multiTaskingWindowNotifier corruption alert timer stop")
+        try:
+            gui.settingsDialogs.NVDASettingsDialog.categoryClasses.remove(
+                MultiTaskingSettingsPanel
+            )
+        except ValueError:
+            # 이미 제거됐거나 등록 실패 상태 — 조용히 무시
+            pass
+        except Exception:
+            log.exception("multiTaskingWindowNotifier 설정 패널 해제 실패")
+        super().terminate()
+
+    def _maybe_flush_switches(self):
+        """디바운스: N회 전환 또는 일정 시간 경과 시 디스크 반영."""
+        now = time.monotonic()
+        if (self._switchesSinceFlush >= self._FLUSH_EVERY_N
+                or (now - self._lastFlushAt) >= self._FLUSH_INTERVAL_SEC):
+            try:
+                appListStore.flush(self.appListFile)
+            except Exception:
+                log.exception("multiTaskingWindowNotifier switch flush")
+            self._lastFlushAt = now
+            self._switchesSinceFlush = 0
 
     def _rebuild_lookup(self):
         """appList 변경 시 검색용 딕셔너리 재구성"""
@@ -83,12 +151,18 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
         if key in self.appLookup or title in self.appLookup:
             ui.message("이미 목록에 있어요.")
             return
-        if len(self.appList) >= MAX_ITEMS:
+        # 사용자 설정 상한과 하드 상한(BEEP_TABLE 길이) 중 작은 값을 적용
+        effective_max = min(settings.get("maxItems"), MAX_ITEMS)
+        if len(self.appList) >= effective_max:
             ui.message("목록이 가득 찼어요. 몇 개 지우고 다시 시도해 주세요.")
             return
 
         self.appList.append(key)
-        appListStore.save(self.appListFile, self.appList)
+        if not appListStore.save(self.appListFile, self.appList):
+            # 저장 실패 → 메모리 롤백 후 사용자 안내
+            self.appList.pop()
+            ui.message("앱 목록을 저장하는 중 문제가 생겼어요. 다시 시도해 주세요.")
+            return
         self._rebuild_lookup()
         ui.message(f"추가했어요: {appId} | {title}")
 
@@ -105,19 +179,20 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 
         # 신형 키 우선 제거. 없으면 구형 제목만 항목 제거 시도.
         # 존재 검사는 O(1) appLookup으로 수행, 실제 제거는 list.remove로 유지.
-        removed = False
+        original = list(self.appList)
         if key in self.appLookup:
             self.appList.remove(key)
-            removed = True
         elif title in self.appLookup:
             self.appList.remove(title)
-            removed = True
-
-        if not removed:
+        else:
             ui.message("목록에 없는 항목이에요.")
             return
 
-        appListStore.save(self.appListFile, self.appList)
+        if not appListStore.save(self.appListFile, self.appList):
+            # 저장 실패 → 메모리 롤백 후 사용자 안내
+            self.appList = original
+            ui.message("앱 목록을 저장하는 중 문제가 생겼어요. 다시 시도해 주세요.")
+            return
         self._rebuild_lookup()
         ui.message("목록에서 삭제했어요.")
 
@@ -127,9 +202,12 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
         gesture="kb:NVDA+shift+r",
     )
     def script_reloadAppList(self, gesture=None):
-        items = appListStore.load(self.appListFile)
+        # reload는 미저장 변경분을 먼저 flush한 뒤 캐시 무효화 후 재로드한다.
+        items = appListStore.reload(self.appListFile)
         self.appList = items
         self._rebuild_lookup()
+        self._lastFlushAt = time.monotonic()
+        self._switchesSinceFlush = 0
         ui.message(f"목록을 다시 불러왔어요. 지금 {len(items)}개예요.")
 
     @script(
@@ -159,26 +237,47 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 
     def event_gainFocus(self, obj, nextHandler):
         # 창 전환 시 파일 I/O 없음. 메모리 목록만 참조.
-        o = api.getFocusObject()
-        if not o:
-            nextHandler()
-            return
+        # event_gainFocus는 모든 포커스 전환마다 호출되므로, 본 애드온 예외가
+        # NVDA 이벤트 체인을 끊지 않도록 try/except + finally로 nextHandler() 보장.
+        try:
+            o = api.getFocusObject()
+            if not o:
+                return
 
-        # 원 설계 유지: 특정 윈도우 클래스에서만 동작
-        if getattr(o, "windowClassName", "") == "Windows.UI.Input.InputSite.WindowClass":
+            # 기본값: Alt+Tab 오버레이(Windows.UI.Input.InputSite.WindowClass)에서만 동작.
+            # enableAllWindows=True면 윈도우 클래스 제한 없이 모든 포커스 전환에서 비프.
+            enable_all = settings.get("enableAllWindows")
+            in_alt_tab = getattr(o, "windowClassName", "") == "Windows.UI.Input.InputSite.WindowClass"
+            if not (enable_all or in_alt_tab):
+                return
+
             title = (getattr(o, "name", "") or "").strip()
-            if title:
-                appId = getAppId(o)
-                key = makeKey(appId, title)
+            if not title:
+                return
 
-                # O(1) 딕셔너리 검색: 신형 키 우선, 없으면 구형(제목만) 시도
-                idx = self.appLookup.get(key)
-                if idx is None:
-                    idx = self.appLookup.get(title)  # 하위호환
+            appId = getAppId(o)
+            key = makeKey(appId, title)
 
-                if idx is not None:
-                    # 같은 appId 중 몇 번째 창인지 계산해 순서에 맞는 비프음 재생
-                    order = self._get_registration_order(key, appId)
-                    play_window_beep(idx, order)
-
-        nextHandler()
+            # O(1) 딕셔너리 검색: 신형 키 우선, 없으면 구형(제목만) 시도
+            matched_key = key if key in self.appLookup else (
+                title if title in self.appLookup else None
+            )
+            if matched_key is not None:
+                idx = self.appLookup[matched_key]
+                # 같은 appId 중 몇 번째 창인지 계산해 순서에 맞는 비프음 재생
+                order = self._get_registration_order(matched_key, appId)
+                play_window_beep(
+                    idx,
+                    order,
+                    duration=settings.get("beepDuration"),
+                    left=settings.get("beepVolumeLeft"),
+                    right=settings.get("beepVolumeRight"),
+                )
+                # 전환 메타 기록 + 디바운스 저장
+                appListStore.record_switch(self.appListFile, matched_key)
+                self._switchesSinceFlush += 1
+                self._maybe_flush_switches()
+        except Exception:
+            log.exception("multiTaskingWindowNotifier event_gainFocus")
+        finally:
+            nextHandler()
