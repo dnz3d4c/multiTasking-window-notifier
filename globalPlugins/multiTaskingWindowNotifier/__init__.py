@@ -179,7 +179,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
         """
         order = 0
         for entry in self.appList:
-            entry_appId, _ = _splitKey(entry)
+            entry_appId, _entry_title = _splitKey(entry)
             if entry_appId == appId:
                 order += 1
                 if entry == key:
