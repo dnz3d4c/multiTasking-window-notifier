@@ -152,14 +152,6 @@ class AppListDialog(wx.Dialog):
 class GlobalPlugin(globalPluginHandler.GlobalPlugin):
     """전역 플러그인: 지정한 창(appName|제목)에 포커스가 오면 비프음 알림"""
 
-    # 제스처 명시적 등록 (데코레이터 방식 + 딕셔너리 방식 병행)
-    __gestures__ = {
-        "kb:nvda+shift+t": "addCurrentWindowTitle",
-        "kb:nvda+shift+d": "removeCurrentWindowTitle",
-        "kb:nvda+shift+r": "reloadAppList",
-        "kb:nvda+shift+i": "showAllEntries",
-    }
-
     def __init__(self):
         super().__init__()
         self.appDir = _config_addon_dir()
