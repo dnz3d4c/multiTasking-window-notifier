@@ -8,7 +8,6 @@
 #   ※ 위 두 항목은 아직 미구현. 구조 영향 적음. 추후 필요 시 추가.
 
 import os
-import time
 import wx
 import api
 import ui
@@ -324,12 +323,12 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
                     # 기본음 재생 (짧게 50ms)
                     tones.beep(base_freq, 50, 30, 30)
 
-                    # 2번째 이상이면 순서에 해당하는 높은 음 재생
+                    # 2번째 이상이면 순서에 해당하는 높은 음을 wx.CallLater로 지연 재생
+                    # (메인 스레드 블로킹 방지)
                     if order > 1:
-                        time.sleep(0.01)  # 10ms 간격
                         # 반음 = 2^(1/12) ≈ 1.059463
                         # order번째 = (order-1)반음 높게
                         higher_freq = int(base_freq * (1.059463 ** (order - 1)))
-                        tones.beep(higher_freq, 50, 30, 30)
+                        wx.CallLater(10, tones.beep, higher_freq, 50, 30, 30)
 
         nextHandler()
