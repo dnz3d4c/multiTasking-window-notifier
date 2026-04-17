@@ -79,8 +79,8 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
             ui.message("창 제목을 확인할 수 없어요.")
             return
 
-        # 중복 체크: 신형 키 또는 구형 제목만 항목 모두 고려
-        if key in self.appList or title in self.appList:
+        # 중복 체크: 신형 키 또는 구형 제목만 항목 모두 고려 (O(1) 딕셔너리 조회)
+        if key in self.appLookup or title in self.appLookup:
             ui.message("이미 목록에 있어요.")
             return
         if len(self.appList) >= MAX_ITEMS:
@@ -104,11 +104,12 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
             return
 
         # 신형 키 우선 제거. 없으면 구형 제목만 항목 제거 시도.
+        # 존재 검사는 O(1) appLookup으로 수행, 실제 제거는 list.remove로 유지.
         removed = False
-        if key in self.appList:
+        if key in self.appLookup:
             self.appList.remove(key)
             removed = True
-        elif title in self.appList:
+        elif title in self.appLookup:
             self.appList.remove(title)
             removed = True
 
