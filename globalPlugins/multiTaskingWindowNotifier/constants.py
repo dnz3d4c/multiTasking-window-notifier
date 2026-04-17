@@ -8,6 +8,13 @@ ADDON_NAME = "multiTaskingWindowNotifier"
 # app.list 최대 항목 수 (BEEP_TABLE 길이와 동일)
 MAX_ITEMS = 64
 
+# 등록 항목 scope.
+#   SCOPE_WINDOW: 특정 창(appId|title 복합키). 활성 탭 제목이 일치할 때만 매칭.
+#   SCOPE_APP   : 앱 전체(appId만). 같은 앱의 어떤 창/탭이든 매칭. 창 매치가
+#                  우선이고 앱 매치는 fallback. v3 스키마에서 도입.
+SCOPE_WINDOW = "window"
+SCOPE_APP = "app"
+
 # 비프 테이블: 64개 주파수. C3(~130Hz)부터 B8(~4978Hz)까지 반음 단위.
 BEEP_TABLE = [
     130, 138, 146, 155, 164, 174, 185, 196, 207, 220, 233, 246,  # C3–B3

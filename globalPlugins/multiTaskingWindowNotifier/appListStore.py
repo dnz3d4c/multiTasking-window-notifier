@@ -3,22 +3,26 @@
 
 """앱 목록 + 메타데이터 저장소.
 
-파일 포맷 (`app.json`):
+파일 포맷 (`app.json`, version=3):
     {
-      "version": 2,
+      "version": 3,
       "items": [
-        {"key": "appId|title",
-         "appId": "...",
-         "title": "...",
+        {"key": "appId|title", "scope": "window",
+         "appId": "...", "title": "...",
          "registeredAt": "YYYY-MM-DDTHH:MM:SS",
          "switchCount": 0,
-         "lastSeenAt": null | "YYYY-MM-DDTHH:MM:SS"}
+         "lastSeenAt": null | "YYYY-MM-DDTHH:MM:SS"},
+        {"key": "appId", "scope": "app",
+         "appId": "...", "title": "",
+         "registeredAt": "...", "switchCount": 0, "lastSeenAt": null}
       ]
     }
 
 하위 호환:
-    - `app.json`이 없고 `app.list`가 있으면 최초 `load()`에서 JSON으로 마이그레이션.
-    - 마이그레이션 완료 시 원본은 `app.list.bak`으로 백업하고 이후엔 JSON만 사용.
+    - v2 (scope 필드 없음): 모든 항목을 scope="window"로 자동 마이그레이션.
+      다음 save() 시점에 version=3로 기록되며 원본은 그대로 덮어쓰기.
+    - `app.json`이 없고 `app.list`가 있으면 최초 `load()`에서 JSON(v3)으로 마이그레이션.
+      모든 줄을 scope="window"로 등록 후 `app.list.bak`으로 백업.
     - 새 설치(둘 다 없음)는 빈 목록으로 시작.
 
 외부 API (기존 호출부 호환):
@@ -41,7 +45,7 @@ from datetime import datetime
 from logHandler import log
 
 from .appIdentity import splitKey
-from .constants import MAX_ITEMS
+from .constants import MAX_ITEMS, SCOPE_APP, SCOPE_WINDOW
 
 # 본 모듈은 데이터 레이어다. 실패 시 `log`로만 보고하고 `ui.message`는 호출하지 않는다.
 # 사용자 대면 알림은 상위 레이어(__init__.py의 script_* 등)에서 반환값으로 판단해 처리.
@@ -82,10 +86,19 @@ def _now_iso() -> str:
 # ------------ 내부 상태 로드/저장 ------------
 
 
-def _new_meta(key: str) -> dict:
-    appId, title = splitKey(key)
+def _new_meta(key: str, scope: str = SCOPE_WINDOW) -> dict:
+    """새 메타 항목 생성.
+
+    scope=SCOPE_APP이면 key는 appId 자체, title은 빈 문자열.
+    scope=SCOPE_WINDOW이면 key는 'appId|title' 복합키 형식이고 splitKey로 분해.
+    """
+    if scope == SCOPE_APP:
+        appId, title = key, ""
+    else:
+        appId, title = splitKey(key)
     return {
         "key": key,
+        "scope": scope,
         "appId": appId,
         "title": title,
         "registeredAt": _now_iso(),
@@ -124,13 +137,29 @@ def _load_from_json(json_path: str):
             f"mtwn: app.json has {len(items)} items, exceeds limit({MAX_ITEMS}). "
             f"Only first {MAX_ITEMS} will be loaded."
         )
-    # 필수 필드 보강 (옛 포맷/손상 대비)
+    # 필수 필드 보강 (옛 포맷/손상 대비).
+    # v2 → v3 자동 마이그레이션:
+    #   - scope 누락 → SCOPE_WINDOW로 보정 (v2는 창 단위만 등록 가능했음)
+    #   - 알 수 없는 scope 값 → SCOPE_WINDOW로 보정 (손상/오타 대비)
     fixed = []
     for it in items[:MAX_ITEMS]:
         if not isinstance(it, dict) or "key" not in it:
             continue
-        meta = _new_meta(it["key"])
-        meta.update({k: v for k, v in it.items() if k in meta})
+        scope = it.get("scope", SCOPE_WINDOW)
+        if scope not in (SCOPE_APP, SCOPE_WINDOW):
+            log.warning(
+                "mtwn: unknown scope %r in app.json item key=%r — coerced to %r",
+                scope, it.get("key"), SCOPE_WINDOW,
+            )
+            scope = SCOPE_WINDOW
+        meta = _new_meta(it["key"], scope=scope)
+        # 디스크 값으로 메타 덮어쓰기. 단 scope는 위에서 정규화한 값이 우선이므로
+        # 디스크 값으로 다시 덮이지 않도록 별도 처리.
+        for k, v in it.items():
+            if k == "scope":
+                continue
+            if k in meta:
+                meta[k] = v
         fixed.append(meta)
     return fixed
 
@@ -163,7 +192,7 @@ def _save_to_disk(list_path: str, state: dict) -> bool:
         return False
 
     tmp = json_path + ".tmp"
-    payload = {"version": 2, "items": state["items"][:MAX_ITEMS]}
+    payload = {"version": 3, "items": state["items"][:MAX_ITEMS]}
     try:
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(payload, f, ensure_ascii=False, indent=2)
@@ -238,20 +267,30 @@ def load(list_path: str) -> list:
     return [it["key"] for it in state["items"]]
 
 
-def save(list_path: str, keys) -> bool:
+def save(list_path: str, keys, scopes=None) -> bool:
     """keys 순서대로 저장. 기존 key의 메타는 보존, 새 key는 기본 메타 생성.
 
     원자적 쓰기 후 메모리 갱신: 디스크 쓰기가 성공했을 때만 `_states`를 반영.
     실패 시 메모리 상태는 이전 그대로 유지되어 호출부 롤백과 일관성이 보장된다.
 
+    Args:
+        keys: 저장할 key 리스트 (순서 보존, 최대 MAX_ITEMS).
+        scopes: 신규 키 한정 scope 매핑 `{key: SCOPE_APP | SCOPE_WINDOW}`.
+            기존 항목은 메타에서 scope를 보존. 미지정 신규 키는 SCOPE_WINDOW.
+            None을 넘기면 모든 신규 키가 SCOPE_WINDOW (기존 호환).
+
     Returns:
         bool: 디스크 쓰기 성공 여부. 실패 시 호출부가 사용자에게 알릴 책임.
     """
+    scopes = scopes or {}
     state = _load_state(list_path)
     existing = {it["key"]: it for it in state["items"]}
     new_items = []
     for k in list(keys)[:MAX_ITEMS]:
-        new_items.append(existing.get(k) or _new_meta(k))
+        if k in existing:
+            new_items.append(existing[k])
+        else:
+            new_items.append(_new_meta(k, scope=scopes.get(k, SCOPE_WINDOW)))
     # 임시 상태로 먼저 디스크 쓰기 시도. 성공 시에만 메모리 반영.
     temp_state = {"items": new_items, "dirty": True}
     if not _save_to_disk(list_path, temp_state):

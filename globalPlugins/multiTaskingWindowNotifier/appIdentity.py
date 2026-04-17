@@ -20,8 +20,17 @@ def getAppId(obj) -> str:
 
 
 def makeKey(appId: str, title: str) -> str:
-    """저장·매칭용 복합키 생성."""
+    """저장·매칭용 복합키 생성 (scope=window 전용)."""
     return f"{appId}|{title}"
+
+
+def makeAppKey(appId: str) -> str:
+    """앱 scope 항목용 키. 단순히 appId 자체.
+
+    splitKey와의 충돌 우려는 scope 필드(meta)로 구분하므로 여기선 발생하지 않음.
+    splitKey는 scope=window 항목에 대해서만 호출한다.
+    """
+    return appId
 
 
 def splitKey(entry: str):
