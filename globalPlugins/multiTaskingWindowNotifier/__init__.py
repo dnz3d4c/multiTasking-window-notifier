@@ -21,6 +21,7 @@ from .appIdentity import getAppId, makeKey, splitKey
 from .appListStore import AppListStore
 from .windowInfo import config_addon_dir, get_current_window_info
 from .beepPlayer import play_window_beep
+from .listDialog import AppListDialog
 
 # 번역 초기화(선택)
 try:
@@ -30,56 +31,6 @@ try:
 except Exception:
     def _(s):
         return s
-
-class AppListDialog(wx.Dialog):
-    """앱 목록 표시 다이얼로그"""
-
-    def __init__(self, parent, appList):
-        super().__init__(parent, title=_("등록된 창 목록"))
-        self.appList = appList
-        self._create_ui()
-        self.CenterOnScreen()
-
-    def _create_ui(self):
-        """UI 구성"""
-        panel = wx.Panel(self)
-        mainSizer = wx.BoxSizer(wx.VERTICAL)
-
-        # 목록 개수 레이블
-        total = len(self.appList)
-        countLabel = wx.StaticText(panel, label=f"총 {total}개")
-        mainSizer.Add(countLabel, flag=wx.ALL, border=10)
-
-        # 리스트박스
-        entries_sorted = sorted(self.appList, key=lambda s: self._display_text(s).lower())
-        display_items = [self._display_text(e) for e in entries_sorted]
-
-        self.listBox = wx.ListBox(
-            panel,
-            choices=display_items,
-            style=wx.LB_SINGLE | wx.LB_HSCROLL,
-            size=(500, 300)
-        )
-        mainSizer.Add(self.listBox, proportion=1, flag=wx.ALL | wx.EXPAND, border=10)
-
-        # 확인 버튼
-        btnOk = wx.Button(panel, wx.ID_OK, _("확인"))
-        btnOk.SetDefault()
-        btnOk.Bind(wx.EVT_BUTTON, self.on_ok)
-        mainSizer.Add(btnOk, flag=wx.ALL | wx.ALIGN_CENTER, border=10)
-
-        panel.SetSizer(mainSizer)
-        mainSizer.Fit(self)
-
-    def _display_text(self, entry: str) -> str:
-        """표시용 텍스트 생성"""
-        appId, title = splitKey(entry)
-        appLabel = appId if appId else "앱 미지정"
-        return f"{appLabel} | {title}"
-
-    def on_ok(self, event):
-        """확인 버튼 클릭"""
-        self.EndModal(wx.ID_OK)
 
 
 class GlobalPlugin(globalPluginHandler.GlobalPlugin):
@@ -115,7 +66,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
                     return order
         return 1  # 기본값
 
-# -------- 스크립트 --------
+    # -------- 스크립트 --------
     # 기본 제스처는 데코레이터 gesture 파라미터로 선언
 
     @script(
