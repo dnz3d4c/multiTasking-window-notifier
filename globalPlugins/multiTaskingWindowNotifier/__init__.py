@@ -13,14 +13,14 @@ import api
 import ui
 import gui
 import tones
-import globalVars
 import globalPluginHandler
 from scriptHandler import script
 from logHandler import log
 
-from .constants import ADDON_NAME, MAX_ITEMS, BEEP_TABLE
+from .constants import MAX_ITEMS, BEEP_TABLE
 from .appIdentity import getAppId, makeKey, splitKey
 from .appListStore import AppListStore
+from .windowInfo import config_addon_dir, get_current_window_info
 
 # 번역 초기화(선택)
 try:
@@ -30,12 +30,6 @@ try:
 except Exception:
     def _(s):
         return s
-
-def _config_addon_dir() -> str:
-    """사용자 설정 경로 하위의 애드온 디렉터리 경로 계산."""
-    base = globalVars.appArgs.configPath
-    return os.path.join(base, "addons", ADDON_NAME, "globalPlugins", ADDON_NAME)
-
 
 class AppListDialog(wx.Dialog):
     """앱 목록 표시 다이얼로그"""
@@ -93,7 +87,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 
     def __init__(self):
         super().__init__()
-        self.appDir = _config_addon_dir()
+        self.appDir = config_addon_dir()
         self.appListFile = os.path.join(self.appDir, "app.list")
         # 초기 1회만 로드
         self.appList = AppListStore.load(self.appListFile)
@@ -121,21 +115,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
                     return order
         return 1  # 기본값
 
-    def _get_current_window_info(self):
-        """현재 창 정보 추출 (공통 메서드)
-
-        Returns:
-            tuple: (fg, appId, title, key) 또는 title이 없으면 (None, None, None, None)
-        """
-        fg = api.getForegroundObject()
-        title = (getattr(fg, "name", "") or "").strip()
-        if not title:
-            return None, None, None, None
-        appId = getAppId(fg)
-        key = makeKey(appId, title)
-        return fg, appId, title, key
-
-    # -------- 스크립트 --------
+# -------- 스크립트 --------
     # 기본 제스처는 데코레이터 gesture 파라미터로 선언
 
     @script(
@@ -144,7 +124,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
         gesture="kb:NVDA+shift+t",
     )
     def script_addCurrentWindowTitle(self, gesture=None):
-        fg, appId, title, key = self._get_current_window_info()
+        fg, appId, title, key = get_current_window_info()
         if not title:
             ui.message("창 제목을 확인할 수 없어요.")
             return
@@ -168,7 +148,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
         gesture="kb:NVDA+shift+d",
     )
     def script_removeCurrentWindowTitle(self, gesture=None):
-        fg, appId, title, key = self._get_current_window_info()
+        fg, appId, title, key = get_current_window_info()
         if not title:
             ui.message("창 제목을 확인할 수 없어요.")
             return
