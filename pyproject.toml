@@ -1,0 +1,18 @@
+[project]
+name = "multi-tasking-window-notifier-tests"
+version = "0.0.0"
+description = "Test harness for the multiTaskingWindowNotifier NVDA add-on (local only, not distributed)."
+requires-python = ">=3.11,<3.13"
+dependencies = []
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7",
+    "wxPython>=4.2",
+    "configobj>=5",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-ra --strict-markers"
