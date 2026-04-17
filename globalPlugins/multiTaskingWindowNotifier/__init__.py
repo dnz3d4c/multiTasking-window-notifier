@@ -18,6 +18,8 @@ import globalPluginHandler
 from scriptHandler import script
 from logHandler import log
 
+from .constants import ADDON_NAME, MAX_ITEMS, BEEP_TABLE
+
 # 번역 초기화(선택)
 try:
     import addonHandler
@@ -26,18 +28,6 @@ try:
 except Exception:
     def _(s):
         return s
-
-ADDON_NAME = "multiTaskingWindowNotifier"
-MAX_ITEMS = 64
-# 비프 테이블 반음 기반
-BEEP_TABLE = [
-    130, 138, 146, 155, 164, 174, 185, 196, 207, 220, 233, 246,  # C3–B3
-    261, 277, 293, 311, 329, 349, 370, 392, 415, 440, 466, 493,  # C4–B4
-    523, 554, 587, 622, 659, 698, 740, 784, 831, 880, 932, 987,  # C5–B5
-    1047, 1109, 1175, 1245, 1319, 1397, 1480, 1568, 1661, 1760, 1865, 1976,  # C6–B6
-    2093, 2217, 2349, 2489, 2637, 2794, 2960, 3136, 3322, 3520, 3729, 3951,  # C7–B7
-    4186, 4435, 4699, 4978  # C8–B8
-]
 
 def _config_addon_dir() -> str:
     """사용자 설정 경로 하위의 애드온 디렉터리 경로 계산."""
