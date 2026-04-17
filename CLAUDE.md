@@ -158,8 +158,8 @@ NVDA 스크린 리더 추가 기능으로 Alt+Tab를 눌렀을 때 여러 창을
   - globalPlugins\multiTaskingWindowNotifier\appIdentity.py: 앱 ID/창 복합키 생성·파싱 유틸
   - globalPlugins\multiTaskingWindowNotifier\appListStore.py: 앱 목록 + 메타데이터 JSON 저장소 (load/save/record_switch/flush/reload/get_meta/prune_stale, reset_cache는 테스트 전용)
   - globalPlugins\multiTaskingWindowNotifier\windowInfo.py: 포커스 창 정보 추출 및 설정 디렉터리 헬퍼
-  - globalPlugins\multiTaskingWindowNotifier\beepPlayer.py: 창 인덱스·순서 기반 비프음 재생
-  - globalPlugins\multiTaskingWindowNotifier\listDialog.py: 등록 창 목록 표시용 wx.Dialog
+  - globalPlugins\multiTaskingWindowNotifier\beepPlayer.py: scope/order 기반 단음 비프 재생 (`play_beep`, scope=app은 base 단음/scope=window는 base±반음 변주)
+  - globalPlugins\multiTaskingWindowNotifier\listDialog.py: 등록 목록 wx.Dialog. 다중 선택 + Delete 키 + 앱 항목 일괄 삭제 확인 흐름 제공
   - globalPlugins\multiTaskingWindowNotifier\settings.py: NVDA config 스키마 정의 및 register/get 헬퍼
   - globalPlugins\multiTaskingWindowNotifier\settingsPanel.py: NVDA 설정 대화상자의 "창 전환 알림" 패널 (SettingsPanel 구현)
   - globalPlugins\multiTaskingWindowNotifier\app.json: 등록된 앱·창 목록 + 메타(전환 카운트/마지막 사용 시각/등록일). 하위호환으로 `app.list`가 있으면 최초 로드 시 자동 마이그레이션 후 `app.list.bak`으로 백업
@@ -196,34 +196,40 @@ multiTaskingWindowNotifier/
   - `scriptHandler.script`: 단축키 등록 데코레이터
   - `addonHandler`: 번역 초기화
 - **이벤트 후킹**
-  - `event_gainFocus`: 창 포커스 전환 시 자동 실행
-  - `windowClassName == "Windows.UI.Input.InputSite.WindowClass"` 조건에서만 비프 재생
+  - `event_gainFocus` 단일 경로. 두 분기:
+    - obj.windowClassName == "Windows.UI.Input.InputSite.WindowClass" → Alt+Tab 오버레이. obj 자체에서 name/appId
+    - 그 외(`enableAllWindows=True`) → `api.getForegroundObject()`에서 name/appId. 메모장처럼 자식 컨트롤(RichEditD2DPT)이 focus를 받아도 활성 탭 제목 취득
+  - 같은 키 0.3초 내 재매칭은 `_MATCH_DEDUP_SEC` 가드로 한 번만
 - **파일 저장소**
   - `appListStore` 모듈: 앱 목록 + 메타 JSON I/O. 모듈 수준 캐시(`_states`)로 상태 유지, `record_switch`/`flush`로 디바운스 저장 지원.
 
 ## 데이터 포맷
-### app.json (Phase 2 이후 기본)
+### app.json (v3, Phase 3 이후 기본)
 ```json
 {
-  "version": 2,
+  "version": 3,
   "items": [
-    {"key": "notepad|제목 없음 - 메모장",
-     "appId": "notepad",
-     "title": "제목 없음 - 메모장",
+    {"key": "chrome", "scope": "app",
+     "appId": "chrome", "title": "",
+     "registeredAt": "2026-04-18T06:00:00",
+     "switchCount": 0, "lastSeenAt": null},
+    {"key": "notepad|제목 없음 - 메모장", "scope": "window",
+     "appId": "notepad", "title": "제목 없음 - 메모장",
      "registeredAt": "2026-04-17T20:00:00",
-     "switchCount": 0,
-     "lastSeenAt": null}
+     "switchCount": 0, "lastSeenAt": null}
   ]
 }
 ```
 - **인코딩**: UTF-8 (ensure_ascii=False)
 - **원자적 저장**: `.tmp` → `os.replace` 패턴
 - **최대 항목**: 64개 (MAX_ITEMS)
+- **scope 필드** (v3 신설)
+  - `"window"` — `appId|title` 복합키. 정확 매치 시 비프.
+  - `"app"` — `appId` 단독 키. 같은 appId의 어떤 창/탭이든 fallback 비프.
 - **메타 필드**
-  - `key` / `appId` / `title` — 복합키와 파생 정보
-  - `registeredAt` — 최초 등록 시각 (ISO 8601, 초 단위)
-  - `switchCount` — 해당 창으로 포커스 전환된 누적 횟수 (#2/#9 기반)
-  - `lastSeenAt` — 마지막 전환 시각 (#7 창 닫기 알림 대비)
+  - `key` / `appId` / `title` — scope=app은 title이 빈 문자열
+  - `registeredAt` / `switchCount` / `lastSeenAt` — 등록/사용 메타
+- **v2 → v3 자동 마이그레이션**: scope 필드가 없으면 모두 `"window"`로 보정. 다음 save 시 version=3로 디스크 승격.
 
 ### 하위호환: app.list
 - 구형 텍스트 포맷(한 줄당 `appId|title` 또는 `title`만).
@@ -241,16 +247,19 @@ multiTaskingWindowNotifier/
 - `_makeKey(appId, title)`: `appId|title` 형식의 복합키 생성
 - `_splitKey(entry)`: 복합키 파싱, 구형 포맷 호환
 
-### 비프음 테이블
+### 비프음 테이블 / 재생
 - `BEEP_TABLE`: 64개 주파수 (130Hz~4978Hz, 반음 단위)
-- 목록 인덱스에 따라 서로 다른 음높이 재생
-- 재생: `tones.beep(주파수, duration, left, right)` — 기본값 50ms / 좌30 / 우30 (Phase 1 이후 `config.conf`로 조정 가능)
+- `play_beep(base_idx, order, scope, ...)` — 단음 1회 재생 (이중 비프 폐기)
+  - scope=app: BEEP_TABLE[base_idx] 단음 (order 무시)
+  - scope=window: BEEP_TABLE[base_idx] × SEMITONE_RATIO^(order-1)
+  - 같은 appId의 app entry가 있으면 그 idx가 base. 없으면 같은 appId 첫 창 entry idx
+- duration / left / right는 `config.conf` 설정 (Phase 1 이후)
 
 ### 등록된 단축키
-- **NVDA+Shift+T**: 현재 창 추가
-- **NVDA+Shift+D**: 현재 창 삭제
+- **NVDA+Shift+T**: 현재 창/앱 추가 (다이얼로그로 scope 선택)
+- **NVDA+Shift+D**: 현재 창/앱 삭제 (정확 매치만, 창>앱 우선)
 - **NVDA+Shift+R**: 목록 파일 새로고침
-- **NVDA+Shift+I**: 등록된 모든 창 보기 (`listDialog.AppListDialog` — `wx.Dialog` 모달)
+- **NVDA+Shift+I**: 등록 목록 다이얼로그 (다중 선택, Delete 키, 앱 일괄 삭제 확인)
 
 ## 코딩 패턴
 - **에러 처리**: try-except로 파일 I/O 오류 처리, ui.message로 사용자에게 알림
@@ -318,7 +327,14 @@ multiTaskingWindowNotifier/
 - **효과**: 업무 효율성 개선
 - **상태**: 보류 (__init__.py:7 메모 참조)
 
-### 10. 동일 앱 다중 창 구분 🪟
-- **목적**: 같은 프로그램의 여러 창 구분
-- **방법**: 크롬 창1, 창2, 창3 각각 다른 비프음, 파일명 기반 구분
-- **효과**: 동일 앱 다중 사용 시 효율 향상
+### 10. 동일 앱 다중 창 구분 🪟 (구현 완료)
+- **목적**: 같은 프로그램의 여러 창/탭 구분
+- **방법**:
+  - 등록 단위가 2계층 — "앱 전체"(SCOPE_APP)와 "특정 창/탭"(SCOPE_WINDOW). 매칭 우선순위 창>앱.
+  - 비프 톤은 같은 appId 창들끼리 같은 base 주파수를 공유하고 등록 순서만큼 반음씩 위로 변주(`beepPlayer.play_beep`).
+  - 탭 전환은 `event_gainFocus` 단일 경로 + `api.getForegroundObject().name`으로 활성 탭 제목 취득. 메모장처럼 자식 컨트롤(RichEditD2DPT)에 focus가 와도 동작.
+- **단축키 변화**:
+  - NVDA+Shift+T: 다이얼로그로 "이 창만/이 앱 전체" 선택
+  - NVDA+Shift+D: 정확 매치(창 키 또는 앱 키)만 삭제 — 다른 앱의 동일 title 창 오삭제 방지
+  - NVDA+Shift+I: 다중 선택 + Delete 키, 앱 항목 일괄 삭제 시 같은 appId 창 동반 삭제 확인
+- **데이터 포맷**: `app.json` v3, `scope` 필드. v2는 자동으로 모든 항목이 `scope=window`로 마이그레이션.
