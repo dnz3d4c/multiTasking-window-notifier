@@ -45,7 +45,7 @@ def play_window_beep(
     """
     if not (0 <= idx < len(BEEP_TABLE)):
         log.warning(
-            f"play_window_beep: idx={idx}가 BEEP_TABLE 범위(0..{len(BEEP_TABLE) - 1}) 밖"
+            f"mtwn: play_window_beep idx={idx} out of range (0..{len(BEEP_TABLE) - 1})"
         )
         return
 

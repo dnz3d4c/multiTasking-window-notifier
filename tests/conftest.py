@@ -36,6 +36,7 @@ for _name in [
     "api",
     "ui",
     "tones",
+    "speech",
     "logHandler",
     "addonHandler",
     "scriptHandler",

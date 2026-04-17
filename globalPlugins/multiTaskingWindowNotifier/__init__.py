@@ -13,6 +13,7 @@ import wx
 import api
 import ui
 import gui
+import speech
 import globalPluginHandler
 from logHandler import log
 from scriptHandler import script
@@ -54,7 +55,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
             if MultiTaskingSettingsPanel not in category_classes:
                 category_classes.append(MultiTaskingSettingsPanel)
         except Exception:
-            log.exception("multiTaskingWindowNotifier 설정 시스템 초기화 실패")
+            log.exception("mtwn: settings init failed")
 
         self.appDir = config_addon_dir()
         self.appListFile = os.path.join(self.appDir, "app.list")
@@ -66,13 +67,13 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
         self._lastFlushAt = time.monotonic()
         self._switchesSinceFlush = 0
 
-        # 손상된 app.json을 만났을 때 한 번만 사용자에게 지연 안내.
-        # wx.CallLater 인스턴스를 self 속성에 보관해 GC 위험 차단 + terminate에서 정리.
-        self._corruptionAlertTimer = None
+        # 손상된 app.json을 만났을 때 한 번만 사용자에게 안내.
+        # ui.delayedMessage는 부팅 시 UI 변화에 묻히지 않도록 NVDA가 제공하는
+        # 전용 헬퍼로, 기본 speechPriority가 Spri.NOW라 다른 음성 뒤에도 인터럽트
+        # 로 반드시 전달된다.
         if appListStore.is_corrupted(self.appListFile):
-            self._corruptionAlertTimer = wx.CallLater(
-                3000,
-                ui.message,
+            log.info(f"mtwn: corruption alert queued path={self.appListFile!r}")
+            ui.delayedMessage(
                 "앱 목록 파일이 손상되어 빈 상태로 시작했어요. "
                 "이전 목록은 자동 복구되지 않으니 필요하면 백업을 확인해 주세요.",
             )
@@ -82,13 +83,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
         try:
             appListStore.flush(self.appListFile)
         except Exception:
-            log.exception("multiTaskingWindowNotifier terminate flush")
-        # 지연 안내 타이머가 아직 대기 중이면 취소해 잔류 콜백 방지.
-        try:
-            if self._corruptionAlertTimer is not None and self._corruptionAlertTimer.IsRunning():
-                self._corruptionAlertTimer.Stop()
-        except Exception:
-            log.exception("multiTaskingWindowNotifier corruption alert timer stop")
+            log.exception("mtwn: terminate flush")
         try:
             gui.settingsDialogs.NVDASettingsDialog.categoryClasses.remove(
                 MultiTaskingSettingsPanel
@@ -97,7 +92,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
             # 이미 제거됐거나 등록 실패 상태 — 조용히 무시
             pass
         except Exception:
-            log.exception("multiTaskingWindowNotifier 설정 패널 해제 실패")
+            log.exception("mtwn: settings panel unregister failed")
         super().terminate()
 
     def _maybe_flush_switches(self):
@@ -108,7 +103,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
             try:
                 appListStore.flush(self.appListFile)
             except Exception:
-                log.exception("multiTaskingWindowNotifier switch flush")
+                log.exception("mtwn: switch flush failed")
             self._lastFlushAt = now
             self._switchesSinceFlush = 0
 
@@ -131,6 +126,10 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
             _, title = splitKey(entry)
             if title and title != entry:
                 self.appLookup.setdefault(title, idx)
+        log.debug(
+            f"mtwn: _rebuild_lookup entries={len(self.appList)} "
+            f"lookup_keys={len(self.appLookup)}"
+        )
 
     def _get_registration_order(self, key, appId):
         """
@@ -160,27 +159,34 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
     def script_addCurrentWindowTitle(self, gesture=None):
         fg, appId, title, key = get_current_window_info()
         if not title:
-            ui.message("창 제목을 확인할 수 없어요.")
+            ui.message("창 제목을 확인할 수 없어요.", speechPriority=speech.Spri.NEXT)
             return
 
         # 중복 체크: 신형 키 또는 구형 제목만 항목 모두 고려 (O(1) 딕셔너리 조회)
         if key in self.appLookup or title in self.appLookup:
-            ui.message("이미 목록에 있어요.")
+            ui.message("이미 목록에 있어요.", speechPriority=speech.Spri.NEXT)
             return
         # 사용자 설정 상한과 하드 상한(BEEP_TABLE 길이) 중 작은 값을 적용
         effective_max = min(settings.get("maxItems"), MAX_ITEMS)
         if len(self.appList) >= effective_max:
-            ui.message("목록이 가득 찼어요. 몇 개 지우고 다시 시도해 주세요.")
+            ui.message(
+                "목록이 가득 찼어요. 몇 개 지우고 다시 시도해 주세요.",
+                speechPriority=speech.Spri.NEXT,
+            )
             return
 
         self.appList.append(key)
         if not appListStore.save(self.appListFile, self.appList):
             # 저장 실패 → 메모리 롤백 후 사용자 안내
             self.appList.pop()
-            ui.message("앱 목록을 저장하는 중 문제가 생겼어요. 다시 시도해 주세요.")
+            ui.message(
+                "앱 목록을 저장하는 중 문제가 생겼어요. 다시 시도해 주세요.",
+                speechPriority=speech.Spri.NOW,
+            )
             return
         self._rebuild_lookup()
-        ui.message(f"추가했어요: {appId} | {title}")
+        ui.message(f"추가했어요: {appId} | {title}", speechPriority=speech.Spri.NEXT)
+        log.info(f"mtwn: add succeeded key={key!r} total={len(self.appList)}")
 
     @script(
         description=_("Remove current window title from notifier list"),
@@ -190,7 +196,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
     def script_removeCurrentWindowTitle(self, gesture=None):
         fg, appId, title, key = get_current_window_info()
         if not title:
-            ui.message("창 제목을 확인할 수 없어요.")
+            ui.message("창 제목을 확인할 수 없어요.", speechPriority=speech.Spri.NEXT)
             return
 
         # 신형 키 우선 제거. 없으면 title 역매핑으로 해당 entry 인덱스를 찾아 pop.
@@ -204,16 +210,20 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
             idx = self.appLookup[title]
             self.appList.pop(idx)
         else:
-            ui.message("목록에 없는 항목이에요.")
+            ui.message("목록에 없는 항목이에요.", speechPriority=speech.Spri.NEXT)
             return
 
         if not appListStore.save(self.appListFile, self.appList):
             # 저장 실패 → 메모리 롤백 후 사용자 안내
             self.appList = original
-            ui.message("앱 목록을 저장하는 중 문제가 생겼어요. 다시 시도해 주세요.")
+            ui.message(
+                "앱 목록을 저장하는 중 문제가 생겼어요. 다시 시도해 주세요.",
+                speechPriority=speech.Spri.NOW,
+            )
             return
         self._rebuild_lookup()
-        ui.message("목록에서 삭제했어요.")
+        ui.message("목록에서 삭제했어요.", speechPriority=speech.Spri.NEXT)
+        log.info(f"mtwn: remove succeeded total={len(self.appList)}")
 
     @script(
         description=_("Reload app list from disk"),
@@ -227,7 +237,11 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
         self._rebuild_lookup()
         self._lastFlushAt = time.monotonic()
         self._switchesSinceFlush = 0
-        ui.message(f"목록을 다시 불러왔어요. 지금 {len(items)}개예요.")
+        ui.message(
+            f"목록을 다시 불러왔어요. 지금 {len(items)}개예요.",
+            speechPriority=speech.Spri.NEXT,
+        )
+        log.info(f"mtwn: reload loaded={len(items)}")
 
     @script(
         description=_("Show all registered entries"),
@@ -237,7 +251,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
     def script_showAllEntries(self, gesture=None):
         # 파일 I/O 없이 메모리 목록 사용
         if not self.appList:
-            ui.message("등록된 창이 없어요.")
+            ui.message("등록된 창이 없어요.", speechPriority=speech.Spri.NEXT)
             return
 
         # wxPython 다이얼로그 표시 (GUI 스레드에서 실행)
@@ -250,7 +264,10 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 
         wx.CallAfter(show_dialog)
         # 간단 음성 요약
-        ui.message(f"총 {len(self.appList)}개를 표시했어요.")
+        ui.message(
+            f"총 {len(self.appList)}개를 표시했어요.",
+            speechPriority=speech.Spri.NEXT,
+        )
 
     # -------- 이벤트 훅 --------
 
@@ -298,6 +315,6 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
                 self._switchesSinceFlush += 1
                 self._maybe_flush_switches()
         except Exception:
-            log.exception("multiTaskingWindowNotifier event_gainFocus")
+            log.exception("mtwn: event_gainFocus failed")
         finally:
             nextHandler()

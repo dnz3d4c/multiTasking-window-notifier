@@ -12,7 +12,7 @@ def getAppId(obj) -> str:
     try:
         appId = getattr(getattr(obj, "appModule", None), "appName", "") or ""
     except Exception:
-        log.debug("appModule.appName 접근 실패", exc_info=True)
+        log.debug("mtwn: getAppId appModule.appName access failed", exc_info=True)
         appId = ""
     if not appId:
         appId = getattr(obj, "windowClassName", "") or "unknown"

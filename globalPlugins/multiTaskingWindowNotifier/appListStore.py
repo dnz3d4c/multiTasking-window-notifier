@@ -109,20 +109,20 @@ def _load_from_json(json_path: str):
     except FileNotFoundError:
         return []
     except Exception:
-        log.error(f"app.json 로드 실패(JSON 파싱): {json_path}", exc_info=True)
+        log.error(f"mtwn: app.json load failed (JSON parse) path={json_path}", exc_info=True)
         return None
 
     if not isinstance(data, dict):
-        log.warning(f"app.json 루트가 dict가 아닙니다: {json_path}")
+        log.warning(f"mtwn: app.json root is not dict path={json_path}")
         return None
     items = data.get("items", [])
     if not isinstance(items, list):
-        log.warning(f"app.json의 'items' 필드가 list가 아닙니다: {json_path}")
+        log.warning(f"mtwn: app.json 'items' field is not list path={json_path}")
         return None
     if len(items) > MAX_ITEMS:
         log.warning(
-            f"app.json 항목이 {len(items)}개로 상한({MAX_ITEMS})을 초과합니다. "
-            f"앞쪽 {MAX_ITEMS}개만 사용하고 나머지는 로드에서 제외됩니다."
+            f"mtwn: app.json has {len(items)} items, exceeds limit({MAX_ITEMS}). "
+            f"Only first {MAX_ITEMS} will be loaded."
         )
     # 필수 필드 보강 (옛 포맷/손상 대비)
     fixed = []
@@ -145,7 +145,7 @@ def _migrate_from_list(list_path: str) -> list:
                 if k:
                     items.append(_new_meta(k))
     except Exception:
-        log.error(f"app.list 마이그레이션 로드 실패: {list_path}", exc_info=True)
+        log.error(f"mtwn: app.list migration load failed path={list_path}", exc_info=True)
         return []
     return items[:MAX_ITEMS]
 
@@ -159,7 +159,7 @@ def _save_to_disk(list_path: str, state: dict) -> bool:
     try:
         os.makedirs(os.path.dirname(json_path), exist_ok=True)
     except Exception:
-        log.error(f"app.json 디렉터리 생성 실패: {json_path}", exc_info=True)
+        log.error(f"mtwn: app.json mkdir failed path={json_path}", exc_info=True)
         return False
 
     tmp = json_path + ".tmp"
@@ -170,7 +170,7 @@ def _save_to_disk(list_path: str, state: dict) -> bool:
         os.replace(tmp, json_path)
         return True
     except Exception:
-        log.error(f"app.json 저장 실패: {json_path}", exc_info=True)
+        log.error(f"mtwn: app.json save failed path={json_path}", exc_info=True)
         # 남은 임시 파일 정리 (실패해도 조용히 무시)
         try:
             if os.path.exists(tmp):
@@ -185,9 +185,9 @@ def _backup_legacy_list(list_path: str) -> None:
         return
     try:
         os.replace(list_path, _bak_path(list_path))
-        log.info(f"app.list를 {_bak_path(list_path)}로 백업했습니다.")
+        log.info(f"mtwn: app.list backed up to {_bak_path(list_path)}")
     except Exception:
-        log.warning("app.list 백업 실패", exc_info=True)
+        log.warning("mtwn: app.list backup failed", exc_info=True)
 
 
 def _load_state(list_path: str) -> dict:
@@ -204,8 +204,8 @@ def _load_state(list_path: str) -> dict:
             # JSON 파싱/구조 실패 — 구형 app.list는 건드리지 않고 보존.
             # 사용자는 손상된 app.json을 복구하거나 삭제할 기회를 가진다.
             log.warning(
-                f"app.json 손상으로 메모리 상태를 빈 리스트로 초기화합니다. "
-                f"app.list 백업은 수행하지 않음: {json_path}"
+                f"mtwn: app.json corrupted, memory state reset to empty list. "
+                f"app.list backup skipped path={json_path}"
             )
             state["corrupted"] = True
             # state["items"]는 기본값 [] 유지. dirty=False도 유지(손상을 덮어쓰지 않도록).
@@ -279,7 +279,7 @@ def record_switch(list_path: str, key: str) -> None:
             it["lastSeenAt"] = _now_iso()
             state["dirty"] = True
             return
-    log.debug(f"record_switch: key 매칭 실패({key!r}) — appLookup과 state 불일치 가능")
+    log.debug(f"mtwn: record_switch key mismatch ({key!r}) — possible appLookup/state drift")
 
 
 def flush(list_path: str) -> bool:

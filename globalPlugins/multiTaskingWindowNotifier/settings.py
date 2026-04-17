@@ -100,7 +100,7 @@ def get(key: str):
         # CONFSPEC에 없는 키면 ValueError/KeyError로 그대로 승격.
         spec_str = CONFSPEC[key]
         log.warning(
-            f"settings.get({key!r}): config.conf[{ADDON_NAME!r}]에 키/섹션 부재 "
-            f"— CONFSPEC default로 폴백"
+            f"mtwn: settings.get fallback key={key!r} "
+            f"— config.conf[{ADDON_NAME!r}] section/key missing, using CONFSPEC default"
         )
         return _parse_default(spec_str)

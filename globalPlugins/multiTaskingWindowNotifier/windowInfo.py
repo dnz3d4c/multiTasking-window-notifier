@@ -32,14 +32,14 @@ def get_current_window_info():
     try:
         fg = api.getForegroundObject()
     except Exception:
-        log.exception("get_current_window_info: getForegroundObject 실패")
+        log.exception("mtwn: get_current_window_info getForegroundObject failed")
         return None, None, None, None
     if fg is None:
         return None, None, None, None
     try:
         title = (getattr(fg, "name", "") or "").strip()
     except Exception:
-        log.exception("get_current_window_info: 포커스 창 이름 읽기 실패")
+        log.exception("mtwn: get_current_window_info read foreground name failed")
         return None, None, None, None
     if not title:
         return None, None, None, None
