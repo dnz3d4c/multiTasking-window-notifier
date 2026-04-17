@@ -103,7 +103,7 @@ NVDA 스크린 리더 추가 기능으로 Alt+Tab를 눌렀을 때 여러 창을
   - globalPlugins\multiTaskingWindowNotifier\__init__.py: GlobalPlugin 및 스크립트/이벤트 훅
   - globalPlugins\multiTaskingWindowNotifier\constants.py: ADDON_NAME, MAX_ITEMS, BEEP_TABLE 상수
   - globalPlugins\multiTaskingWindowNotifier\appIdentity.py: 앱 ID/창 복합키 생성·파싱 유틸
-  - globalPlugins\multiTaskingWindowNotifier\appListStore.py: app.list 파일 I/O 전담 클래스
+  - globalPlugins\multiTaskingWindowNotifier\appListStore.py: app.list 파일 I/O 전담 (load/save 모듈 함수)
   - globalPlugins\multiTaskingWindowNotifier\windowInfo.py: 포커스 창 정보 추출 및 설정 디렉터리 헬퍼
   - globalPlugins\multiTaskingWindowNotifier\beepPlayer.py: 창 인덱스·순서 기반 비프음 재생
   - globalPlugins\multiTaskingWindowNotifier\listDialog.py: 등록 창 목록 표시용 wx.Dialog
@@ -142,7 +142,7 @@ multiTaskingWindowNotifier/
   - `event_gainFocus`: 창 포커스 전환 시 자동 실행
   - `windowClassName == "Windows.UI.Input.InputSite.WindowClass"` 조건에서만 비프 재생
 - **파일 저장소**
-  - `AppListStore` 클래스: app.list 파일 읽기/쓰기 전담
+  - `appListStore` 모듈: app.list 파일 읽기/쓰기 전담 (load/save 함수)
 
 ## 데이터 포맷
 ### app.list
