@@ -14,7 +14,6 @@ import ui
 import gui
 import globalPluginHandler
 from scriptHandler import script
-from logHandler import log
 
 from .constants import MAX_ITEMS
 from .appIdentity import getAppId, makeKey, splitKey
