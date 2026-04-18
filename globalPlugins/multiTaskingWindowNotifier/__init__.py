@@ -279,12 +279,26 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
             ui.message("창 제목을 확인할 수 없어요.", speechPriority=speech.Spri.NEXT)
             return
 
+        # 사전 중복 검사: 창과 앱 둘 다 이미 등록돼 있으면 다이얼로그 건너뛰고 즉시 안내.
+        # 한쪽만 등록돼 있으면 다이얼로그는 뜨되 라벨에 꼬리표로 상태 표시 — 사용자는
+        # 남은 scope로만 추가 가능. _do_add 내부 중복 검사는 안전망으로 유지.
+        window_registered = key in self.windowLookup
+        app_registered = appId in self.appLookup
+        if window_registered and app_registered:
+            ui.message("이미 창과 앱 둘 다 목록에 있어요.", speechPriority=speech.Spri.NEXT)
+            return
+
         # scope 선택 다이얼로그를 GUI 스레드에서 띄우고 결과를 콜백으로 처리.
         # wx.SingleChoiceDialog는 키보드/스크린리더 친화적이며 기본 포커스가
         # 첫 항목("이 창만")이라 Enter 한 번으로 기존 동작 재현 가능.
+        # Translators: scope 선택 다이얼로그에서 이미 등록된 항목 끝에 붙는 꼬리표.
+        # 앞 공백은 번역 문자열 밖에 두어 번역 시 공백 유실 위험 차단.
+        already_suffix = " " + _("(이미 등록됨)")
         choices = [
-            _("이 창만 (%(app)s | %(title)s)") % {"app": appId, "title": title},
-            _("이 앱 전체 (%s)") % appId,
+            (_("이 창만 (%(app)s | %(title)s)") % {"app": appId, "title": title})
+            + (already_suffix if window_registered else ""),
+            (_("이 앱 전체 (%s)") % appId)
+            + (already_suffix if app_registered else ""),
         ]
 
         def show_choice():

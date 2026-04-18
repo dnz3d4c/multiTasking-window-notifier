@@ -12,6 +12,8 @@ Phase 3 변경:
 
 import wx
 
+from gui import guiHelper
+
 from .appIdentity import splitKey
 from .constants import SCOPE_APP, SCOPE_WINDOW
 
@@ -47,37 +49,48 @@ class AppListDialog(wx.Dialog):
         self.CenterOnScreen()
 
     def _create_ui(self):
-        panel = wx.Panel(self)
-        mainSizer = wx.BoxSizer(wx.VERTICAL)
+        # NVDA 설정 대화상자 관례: sHelper를 독립적으로 만들고 바깥 mainSizer가
+        # BORDER_FOR_DIALOGS 여백을 한 겹 감싼다 (LanguageRestartDialog 패턴).
+        # 이 여백이 없으면 addDialogDismissButtons의 ALIGN_RIGHT 결과가 창 가장
+        # 오른쪽에 딱 붙어 보이고, 전체 레이아웃이 NVDA 다른 대화상자와 어긋난다.
+        sHelper = guiHelper.BoxSizerHelper(self, orientation=wx.VERTICAL)
 
-        # 멤버 보관 — 일괄 삭제 후 갱신 대상
-        self.countLabel = wx.StaticText(panel, label=self._count_text())
-        mainSizer.Add(self.countLabel, flag=wx.ALL, border=10)
+        # 카운트 라벨 — 일괄 삭제 후 SetLabel로 갱신 대상이라 멤버로 보관.
+        self.countLabel = sHelper.addItem(
+            wx.StaticText(self, label=self._count_text())
+        )
 
-        self.listBox = wx.ListBox(
-            panel,
+        # addLabeledControl: ListBox 앞에 "등록된 항목:" 라벨을 붙여 NVDA가 낭독.
+        # size는 기존 픽셀값 유지. style에 LB_EXTENDED(다중 선택) + LB_HSCROLL.
+        self.listBox = sHelper.addLabeledControl(
+            _("등록된 항목:"),
+            wx.ListBox,
             choices=[self._display_text(e) for e in self._entries],
             style=wx.LB_EXTENDED | wx.LB_HSCROLL,
             size=(560, 320),
         )
         self.listBox.Bind(wx.EVT_KEY_DOWN, self._on_listbox_key)
-        mainSizer.Add(self.listBox, proportion=1, flag=wx.ALL | wx.EXPAND, border=10)
 
-        # 버튼 줄: 삭제(콜백 있을 때만) + 닫기
-        btnSizer = wx.BoxSizer(wx.HORIZONTAL)
+        # "선택 항목 삭제"는 다이얼로그를 닫지 않는 action 버튼이므로 addItem으로.
+        # addDialogDismissButtons는 dismiss 전용(닫기/취소 류)에만 쓰는 게 guiHelper 계약.
         if self._on_delete is not None:
-            self.deleteBtn = wx.Button(panel, label=_("선택 항목 삭제(&D)"))
+            actionButtons = guiHelper.ButtonHelper(wx.HORIZONTAL)
+            self.deleteBtn = actionButtons.addButton(self, label=_("선택 항목 삭제(&D)"))
             self.deleteBtn.Bind(wx.EVT_BUTTON, self._on_delete_button)
-            btnSizer.Add(self.deleteBtn, flag=wx.RIGHT, border=10)
+            sHelper.addItem(actionButtons)
 
-        btnOk = wx.Button(panel, wx.ID_OK, _("닫기"))
+        # dismiss 버튼(닫기)은 단일 버튼으로 addDialogDismissButtons에 전달.
+        btnOk = wx.Button(self, id=wx.ID_OK, label=_("닫기"))
         btnOk.SetDefault()
         btnOk.Bind(wx.EVT_BUTTON, self._on_ok)
-        btnSizer.Add(btnOk)
-        mainSizer.Add(btnSizer, flag=wx.ALL | wx.ALIGN_CENTER, border=10)
+        sHelper.addDialogDismissButtons(btnOk)
 
-        panel.SetSizer(mainSizer)
+        mainSizer = wx.BoxSizer(wx.VERTICAL)
+        mainSizer.Add(sHelper.sizer, border=guiHelper.BORDER_FOR_DIALOGS, flag=wx.ALL)
+        self.SetSizer(mainSizer)
         mainSizer.Fit(self)
+        # Escape로 닫히도록 명시. NVDA 관례(LanguageRestartDialog)에 맞춰 프로퍼티 스타일.
+        self.EscapeId = wx.ID_OK
 
     def _display_text(self, entry: str) -> str:
         scope = self._get_scope(entry)
