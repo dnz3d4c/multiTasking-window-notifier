@@ -68,9 +68,7 @@ path 인자는 기존 `app.list` 경로를 그대로 받는다. 내부에서 같
 `app.json`으로 변환해 사용하므로 호출부는 수정 불필요.
 """
 
-import json
 import os
-from datetime import datetime
 
 from logHandler import log
 
@@ -82,6 +80,14 @@ from .constants import (
     MAX_ITEMS,
     SCOPE_APP,
     SCOPE_WINDOW,
+)
+from .store.io import (
+    _bak_path,
+    _json_path,
+    _load_from_json,
+    _new_meta,
+    _now_iso,
+    _save_to_disk,
 )
 
 # 본 모듈은 데이터 레이어다. 실패 시 `log`로만 보고하고 `ui.message`는 호출하지 않는다.
@@ -109,49 +115,8 @@ def reset_cache() -> None:
     _states.clear()
 
 
-# ------------ 경로 변환 헬퍼 ------------
-
-
-def _json_path(list_path: str) -> str:
-    """`.../app.list` → `.../app.json`"""
-    directory = os.path.dirname(list_path)
-    return os.path.join(directory, "app.json")
-
-
-def _bak_path(list_path: str) -> str:
-    return list_path + ".bak"
-
-
-def _now_iso() -> str:
-    return datetime.now().isoformat(timespec="seconds")
-
-
-# ------------ 내부 상태 로드/저장 ------------
-
-
-def _new_meta(key: str, scope: str = SCOPE_WINDOW, tabBeepIdx: int = None) -> dict:
-    """새 메타 항목 생성.
-
-    scope=SCOPE_APP이면 key는 appId 자체, title은 빈 문자열, tabBeepIdx 없음.
-    scope=SCOPE_WINDOW이면 key는 'appId|title' 복합키 형식이고 splitKey로 분해.
-    tabBeepIdx는 scope=window 전용 필드로, 같은 appId 내 고유 탭 비프(b) idx.
-    """
-    if scope == SCOPE_APP:
-        appId, title = key, ""
-    else:
-        appId, title = splitKey(key)
-    meta = {
-        "key": key,
-        "scope": scope,
-        "appId": appId,
-        "title": title,
-        "registeredAt": _now_iso(),
-        "switchCount": 0,
-        "lastSeenAt": None,
-    }
-    if scope == SCOPE_WINDOW and tabBeepIdx is not None:
-        meta["tabBeepIdx"] = int(tabBeepIdx)
-    return meta
+# 경로/시간/메타 헬퍼와 JSON 역직렬화·원자적 저장은 `store.io`에서 관리한다.
+# 본 모듈 상단의 import 블록에서 재export한다(Phase 3.2).
 
 
 def _assign_next_idx(used, size: int = BEEP_TABLE_SIZE, start: int = 0) -> int:
@@ -193,94 +158,6 @@ def _assign_next_idx(used, size: int = BEEP_TABLE_SIZE, start: int = 0) -> int:
     return nxt
 
 
-def _load_from_json(json_path: str):
-    """Returns:
-        tuple(list, dict, int): 정상 로드 (items, appBeepMap, version).
-            파일 없거나 비어있으면 ([], {}, 0).
-        None: 파일은 있으나 파싱/구조 실패 (손상 신호).
-
-    None과 ([], {}, 0)를 구분하는 이유:
-        호출부(`_load_state`)가 "정상적으로 비어있음(=마이그레이션/백업 가능)"과
-        "손상으로 인한 빈 상태(=구형 app.list는 건드리지 말고 보존)"를 구분해야 한다.
-
-    appBeepMap은 v4부터 디스크에 저장된다. v3 이하는 빈 dict로 반환되고 호출부가
-    거리 기반 알고리즘으로 재할당한다. version은 `_load_state`가 v4→v5
-    강제 재배정 판단에 사용한다.
-    """
-    try:
-        with open(json_path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-    except FileNotFoundError:
-        return ([], {}, 0)
-    except Exception:
-        log.error(f"mtwn: app.json load failed (JSON parse) path={json_path}", exc_info=True)
-        return None
-
-    if not isinstance(data, dict):
-        log.warning(f"mtwn: app.json root is not dict path={json_path}")
-        return None
-    version = data.get("version", 0)
-    if not isinstance(version, int):
-        version = 0
-    items = data.get("items", [])
-    if not isinstance(items, list):
-        log.warning(f"mtwn: app.json 'items' field is not list path={json_path}")
-        return None
-    if len(items) > MAX_ITEMS:
-        log.warning(
-            f"mtwn: app.json has {len(items)} items, exceeds limit({MAX_ITEMS}). "
-            f"Only first {MAX_ITEMS} will be loaded."
-        )
-
-    raw_app_beep_map = data.get("appBeepMap", {})
-    if not isinstance(raw_app_beep_map, dict):
-        log.warning(f"mtwn: app.json 'appBeepMap' field is not dict path={json_path}")
-        raw_app_beep_map = {}
-    # 값 검증: int + BEEP_TABLE 범위. 벗어나면 버림(호출부가 재할당).
-    app_beep_map = {}
-    for app_id, idx in raw_app_beep_map.items():
-        if not isinstance(app_id, str):
-            continue
-        if not isinstance(idx, int) or not (0 <= idx < BEEP_TABLE_SIZE):
-            log.warning(
-                f"mtwn: appBeepMap[{app_id!r}]={idx!r} invalid, will be reassigned"
-            )
-            continue
-        app_beep_map[app_id] = idx
-
-    # 필수 필드 보강 (옛 포맷/손상 대비).
-    # v2 → v3 → v4 자동 마이그레이션:
-    #   - scope 누락 → SCOPE_WINDOW로 보정 (v2는 창 단위만 등록 가능했음)
-    #   - 알 수 없는 scope 값 → SCOPE_WINDOW로 보정 (손상/오타 대비)
-    #   - scope=window의 tabBeepIdx 누락/무효 → 호출부가 거리 기반 재할당 (v3 이하)
-    fixed = []
-    for it in items[:MAX_ITEMS]:
-        if not isinstance(it, dict) or "key" not in it:
-            continue
-        scope = it.get("scope", SCOPE_WINDOW)
-        if scope not in (SCOPE_APP, SCOPE_WINDOW):
-            log.warning(
-                "mtwn: unknown scope %r in app.json item key=%r — coerced to %r",
-                scope, it.get("key"), SCOPE_WINDOW,
-            )
-            scope = SCOPE_WINDOW
-        meta = _new_meta(it["key"], scope=scope)
-        # 디스크 값으로 메타 덮어쓰기. 단 scope는 위에서 정규화한 값이 우선이므로
-        # 디스크 값으로 다시 덮이지 않도록 별도 처리. tabBeepIdx는 scope=window에서
-        # 유효 정수일 때만 수용.
-        for k, v in it.items():
-            if k == "scope":
-                continue
-            if k == "tabBeepIdx":
-                if scope == SCOPE_WINDOW and isinstance(v, int) and 0 <= v < BEEP_TABLE_SIZE:
-                    meta["tabBeepIdx"] = v
-                continue
-            if k in meta:
-                meta[k] = v
-        fixed.append(meta)
-    return (fixed, app_beep_map, version)
-
-
 def _migrate_from_list(list_path: str) -> list:
     """구형 `app.list` → 메타 딕셔너리 리스트.
 
@@ -311,43 +188,6 @@ def _migrate_from_list(list_path: str) -> list:
         log.error(f"mtwn: app.list migration load failed path={list_path}", exc_info=True)
         return []
     return items[:MAX_ITEMS]
-
-
-def _save_to_disk(list_path: str, state: dict) -> bool:
-    """원자적 저장(.tmp → os.replace). 성공 시 True, 실패 시 False.
-
-    사용자 알림은 호출부의 책임. 본 함수는 log만 남긴다.
-    """
-    json_path = _json_path(list_path)
-    try:
-        os.makedirs(os.path.dirname(json_path), exist_ok=True)
-    except Exception:
-        log.error(f"mtwn: app.json mkdir failed path={json_path}", exc_info=True)
-        return False
-
-    tmp = json_path + ".tmp"
-    # v7: 온음계(C major 7음 × 5옥타브 = 35) 테이블 기반 순차 할당 포맷.
-    # v6(반음 64)에서 테이블 크기와 의미가 동시에 바뀌었으므로 v6 이하 파일은
-    # _load_state ⑥단계에서 전체 재배정된 뒤 여기 도달해 v7로 승격 저장된다.
-    payload = {
-        "version": 7,
-        "appBeepMap": dict(state.get("appBeepMap", {})),
-        "items": state["items"][:MAX_ITEMS],
-    }
-    try:
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(payload, f, ensure_ascii=False, indent=2)
-        os.replace(tmp, json_path)
-        return True
-    except Exception:
-        log.error(f"mtwn: app.json save failed path={json_path}", exc_info=True)
-        # 남은 임시 파일 정리 (실패해도 조용히 무시)
-        try:
-            if os.path.exists(tmp):
-                os.remove(tmp)
-        except Exception:
-            pass
-        return False
 
 
 def _backup_legacy_list(list_path: str) -> None:
