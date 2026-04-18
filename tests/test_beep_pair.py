@@ -22,8 +22,8 @@ def mock_tones(monkeypatch):
     """tones.beep 호출을 캡처."""
     calls = []
 
-    def fake_beep(freq, duration, left, right):
-        calls.append(("beep", freq, duration, left, right))
+    def fake_beep(freq, duration):
+        calls.append(("beep", freq, duration))
 
     monkeypatch.setattr(beepPlayer.tones, "beep", fake_beep)
     return calls
@@ -52,32 +52,32 @@ def mock_call_later(monkeypatch):
 def test_scope_app_plays_single_beep(mock_tones, mock_call_later):
     """scope=app은 app_idx 단음 1회 재생. tab_idx는 무시."""
     beepPlayer.play_beep(10, tab_idx=20, scope=SCOPE_APP,
-                         duration=50, gap_ms=15, left=50, right=50)
+                         duration=50, gap_ms=15)
 
     # 단 1번, app_idx=10의 주파수.
     assert len(mock_tones) == 1
-    assert mock_tones[0] == ("beep", BEEP_TABLE[10], 50, 50, 50)
+    assert mock_tones[0] == ("beep", BEEP_TABLE[10], 50)
 
 
 def test_scope_window_plays_two_beeps(mock_tones, mock_call_later):
     """scope=window + tab_idx 지정 → a → b 2음."""
     beepPlayer.play_beep(5, tab_idx=30, scope=SCOPE_WINDOW,
-                         duration=50, gap_ms=15, left=50, right=50)
+                         duration=50, gap_ms=15)
 
     assert len(mock_tones) == 2
     # 첫 번째: app_idx=5의 주파수 (앱 비프 a)
-    assert mock_tones[0] == ("beep", BEEP_TABLE[5], 50, 50, 50)
+    assert mock_tones[0] == ("beep", BEEP_TABLE[5], 50)
     # 두 번째: tab_idx=30의 주파수 (탭 비프 b)
-    assert mock_tones[1] == ("beep", BEEP_TABLE[30], 50, 50, 50)
+    assert mock_tones[1] == ("beep", BEEP_TABLE[30], 50)
 
 
 def test_scope_window_without_tab_idx_is_single_beep(mock_tones, mock_call_later):
     """scope=window지만 tab_idx=None이면 단음 fallback."""
     beepPlayer.play_beep(7, tab_idx=None, scope=SCOPE_WINDOW,
-                         duration=50, gap_ms=15, left=50, right=50)
+                         duration=50, gap_ms=15)
 
     assert len(mock_tones) == 1
-    assert mock_tones[0] == ("beep", BEEP_TABLE[7], 50, 50, 50)
+    assert mock_tones[0] == ("beep", BEEP_TABLE[7], 50)
 
 
 def test_app_idx_out_of_range_is_silent(mock_tones, mock_call_later):
@@ -90,11 +90,11 @@ def test_app_idx_out_of_range_is_silent(mock_tones, mock_call_later):
 def test_tab_idx_out_of_range_falls_back_to_single(mock_tones, mock_call_later):
     """tab_idx가 범위 밖이면 경고 + 단음 (app 비프는 발사)."""
     beepPlayer.play_beep(10, tab_idx=999, scope=SCOPE_WINDOW,
-                         duration=50, gap_ms=15, left=50, right=50)
+                         duration=50, gap_ms=15)
 
     # a는 이미 재생됐고 b는 생략.
     assert len(mock_tones) == 1
-    assert mock_tones[0] == ("beep", BEEP_TABLE[10], 50, 50, 50)
+    assert mock_tones[0] == ("beep", BEEP_TABLE[10], 50)
 
 
 def test_scope_app_does_not_schedule_second_beep(mock_tones, mock_call_later):

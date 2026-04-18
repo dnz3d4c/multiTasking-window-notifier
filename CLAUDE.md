@@ -271,15 +271,15 @@ multiTaskingWindowNotifier/
 
 ### 비프음 테이블 / 재생 (v4 2차원, v7 온음계 전환)
 - `BEEP_TABLE`: 35개 주파수 (C3 130Hz ~ B7 3951Hz, C major 온음계 7음 × 5옥타브). `BEEP_TABLE_SIZE` 상수로 노출. v7 이전은 반음 64음이었으나 인접 슬롯 변별이 약하다는 피드백으로 온음계로 교체 — 1번과 2번이 "도→레" 전음 간격으로 분리돼 명확히 구분된다.
-- `play_beep(app_idx, tab_idx=None, scope, duration, gap_ms, left, right)` — 2차원 비프.
-  - scope=app 또는 tab_idx=None: `tones.beep(BEEP_TABLE[app_idx])` 단음 1회.
-  - scope=window + tab_idx 지정: a 재생 → `core.callLater(gap_ms, tones.beep, b)` 2음.
+- `play_beep(app_idx, tab_idx=None, scope, duration, gap_ms)` — 2차원 비프.
+  - scope=app 또는 tab_idx=None: `tones.beep(BEEP_TABLE[app_idx], duration)` 단음 1회.
+  - scope=window + tab_idx 지정: a 재생 → `core.callLater(gap_ms, tones.beep, b, duration)` 2음.
   - `_schedule_second_beep` 폴백 순서: core.callLater → wx.CallLater → 동기 호출.
 - `_resolve_beep_pair(matched_key, scope, appId)`:
   - real_app_id = matched_key에서 splitKey로 추출 (Alt+Tab 오버레이 title 역매핑 호환).
   - app_idx = appBeepMap[real_app_id] (자동 할당 보장). tab_idx = entry.tabBeepIdx (scope=window만).
   - miss 시 0으로 폴백 + log.warning.
-- duration / gap_ms / left / right는 `config.conf` 설정 (기본 50 / 100 / 50 / 50). gap_ms는 15→60→100ms로 두 차례 상향 — 60ms에서도 두 음이 한 덩어리로 뭉쳐 들린다는 피드백 후 재조정.
+- duration / gap_ms는 `config.conf` 설정 (기본 50 / 100). gap_ms는 15→60→100ms로 두 차례 상향 — 60ms에서도 두 음이 한 덩어리로 뭉쳐 들린다는 피드백 후 재조정. 좌/우 채널 볼륨 옵션은 v7 이후 제거(항상 50/50로 운용 → tones SDK 기본값과 동치).
 
 ### 등록된 단축키
 - **NVDA+Shift+T**: 현재 창/앱 추가 (다이얼로그로 scope 선택)

@@ -54,14 +54,12 @@ def test_register_creates_section_and_fills_defaults(real_config):
 
     assert ADDON_KEY in real_config
     section = real_config[ADDON_KEY]
-    # v4: 2음 재생으로 duration 단축 + gap 신설. maxItems는 BEEP_TABLE과 디커플.
+    # v4: 2음 재생으로 duration 단축 + gap 신설.
     # beepGapMs는 15→60→100으로 두 차례 상향. 60에서도 두 음이 한 덩어리로
     # 들린다는 피드백 후 100ms로 재조정.
     assert section["beepDuration"] == 50
     assert section["beepGapMs"] == 100
-    assert section["beepVolumeLeft"] == 50
-    assert section["beepVolumeRight"] == 50
-    assert section["maxItems"] == 128
+    assert section["debugLogging"] is False
 
 
 def test_register_preserves_user_values(real_config):
@@ -95,7 +93,54 @@ def test_get_fallback_when_key_missing(real_config):
     from globalPlugins.multiTaskingWindowNotifier import settings
 
     settings.register()
-    del real_config[ADDON_KEY]["beepVolumeLeft"]
+    del real_config[ADDON_KEY]["beepGapMs"]
 
     # 키만 빠진 상황에서도 폴백이 동작해야 event_gainFocus가 안 죽는다
-    assert settings.get("beepVolumeLeft") == 50
+    assert settings.get("beepGapMs") == 100
+
+
+def test_register_purges_obsolete_keys(real_config):
+    """과거 버전 confspec에 있던 키(beepVolumeLeft/Right/maxItems)가 nvda.ini에
+    잔재로 남아 있으면 register() 1회 호출로 제거되어야 한다.
+
+    configobj가 spec 외 키를 자동 무시하긴 해도 nvda.ini 파일 자체에는 그대로
+    남아 지원 인력/사용자가 봤을 때 혼란을 준다. 명시 obsolete 리스트만 제거하고
+    살아있는 키와 알려지지 않은 외부 키는 보호한다.
+    """
+    from globalPlugins.multiTaskingWindowNotifier import settings
+
+    # 사전 조건: 사용자 nvda.ini에 obsolete 키가 박혀있는 상태 + 외부 도구가
+    # 추가했을 수도 있는 미지의 키도 함께. 살아있는 키는 사용자 커스텀 값으로.
+    real_config[ADDON_KEY] = {
+        "beepDuration": 77,
+        "beepVolumeLeft": 50,
+        "beepVolumeRight": 50,
+        "maxItems": 64,
+        "someUnknownKey": "preserve-me",
+    }
+
+    settings.register()
+
+    section = real_config[ADDON_KEY]
+    # obsolete 3종 모두 제거.
+    assert "beepVolumeLeft" not in section
+    assert "beepVolumeRight" not in section
+    assert "maxItems" not in section
+    # 살아있는 사용자 값 보존 + 빠진 spec 키는 default 주입.
+    assert section["beepDuration"] == 77
+    assert section["beepGapMs"] == 100
+    # 알려지지 않은 외부 키는 건드리지 않음 (안전 원칙).
+    assert section["someUnknownKey"] == "preserve-me"
+
+
+def test_register_purge_is_idempotent(real_config):
+    """이미 정리된 상태에서 register()를 다시 호출해도 안전해야 한다."""
+    from globalPlugins.multiTaskingWindowNotifier import settings
+
+    settings.register()
+    settings.register()  # 멱등 재호출
+
+    section = real_config[ADDON_KEY]
+    assert "beepVolumeLeft" not in section
+    assert "maxItems" not in section
+    assert section["beepDuration"] == 50

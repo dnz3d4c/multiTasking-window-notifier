@@ -32,12 +32,9 @@ BEEP_DURATION_MS = 50
 # 100ms로 재조정. duration 50ms + gap 100ms = 총 150ms로 두 음이
 # 뚜렷이 "딩 … 동"으로 분리되면서도 Alt+Tab 체감 속도는 유지된다.
 BEEP_GAP_MS = 100
-BEEP_LEFT_VOL = 50
-BEEP_RIGHT_VOL = 50
 
 
-def _schedule_second_beep(freq: int, duration: int, left: int, right: int,
-                          gap_ms: int) -> None:
+def _schedule_second_beep(freq: int, duration: int, gap_ms: int) -> None:
     """gap_ms 뒤에 tones.beep을 호출한다.
 
     우선순위:
@@ -48,18 +45,18 @@ def _schedule_second_beep(freq: int, duration: int, left: int, right: int,
     """
     try:
         import core
-        core.callLater(gap_ms, tones.beep, freq, duration, left, right)
+        core.callLater(gap_ms, tones.beep, freq, duration)
         return
     except Exception:
         log.debug("mtwn: core.callLater unavailable, falling back to wx")
     try:
         import wx
-        wx.CallLater(gap_ms, tones.beep, freq, duration, left, right)
+        wx.CallLater(gap_ms, tones.beep, freq, duration)
         return
     except Exception:
         log.debug("mtwn: wx.CallLater unavailable, second beep fired synchronously")
     try:
-        tones.beep(freq, duration, left, right)
+        tones.beep(freq, duration)
     except Exception:
         log.exception("mtwn: second beep fallback failed")
 
@@ -70,8 +67,6 @@ def play_beep(
     scope: str = SCOPE_APP,
     duration: int = BEEP_DURATION_MS,
     gap_ms: int = BEEP_GAP_MS,
-    left: int = BEEP_LEFT_VOL,
-    right: int = BEEP_RIGHT_VOL,
 ) -> None:
     """앱 비프 a + (옵션) 탭 비프 b 재생.
 
@@ -84,13 +79,12 @@ def play_beep(
             무시 (단음).
         duration: 각 음 지속 시간(ms). 2음 재생 시 a와 b 모두 같은 duration.
         gap_ms: a 종료 후 b 시작까지 간격(ms). scope=app/tab_idx=None이면 무시.
-        left, right: 좌/우 채널 볼륨 (0~100).
 
     동작:
         - app_idx가 BEEP_TABLE 범위를 벗어나면 경고 로그 후 무음 (예외 없음).
         - tab_idx가 범위를 벗어나면 경고 로그 + 단음 fallback.
-        - SCOPE_APP: `tones.beep(a, duration, left, right)` 1회.
-        - SCOPE_WINDOW + tab_idx: a 즉시 재생 → `wx.CallLater(gap_ms, beep, b)`.
+        - SCOPE_APP: `tones.beep(a, duration)` 1회.
+        - SCOPE_WINDOW + tab_idx: a 즉시 재생 → `core.callLater(gap_ms, beep, b)`.
     """
     if not (0 <= app_idx < BEEP_TABLE_SIZE):
         log.warning(
@@ -99,7 +93,7 @@ def play_beep(
         return
 
     a_freq = BEEP_TABLE[app_idx]
-    tones.beep(a_freq, duration, left, right)
+    tones.beep(a_freq, duration)
 
     # scope=app 또는 tab_idx 부재 → 단음 종료.
     if scope == SCOPE_APP or tab_idx is None:
@@ -112,4 +106,4 @@ def play_beep(
         return
 
     b_freq = BEEP_TABLE[tab_idx]
-    _schedule_second_beep(b_freq, duration, left, right, gap_ms)
+    _schedule_second_beep(b_freq, duration, gap_ms)

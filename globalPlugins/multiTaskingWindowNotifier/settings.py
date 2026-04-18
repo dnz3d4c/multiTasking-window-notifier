@@ -14,7 +14,7 @@ import re
 import config
 from logHandler import log
 
-from .constants import ADDON_NAME, MAX_ITEMS
+from .constants import ADDON_NAME
 
 # NVDA config.conf 스키마.
 # 문자열 포맷: "<type>(default=<v>, min=<v>, max=<v>)"
@@ -22,20 +22,23 @@ from .constants import ADDON_NAME, MAX_ITEMS
 # - beepGapMs         : 앱 비프 a와 탭 비프 b 사이 간격(ms). v4 신설.
 #                      100ms가 기본 — 15→60→100으로 두 차례 상향. 60에서도 두 음이
 #                      한 덩어리로 뭉쳐 들린다는 피드백 후 재조정.
-# - beepVolumeLeft    : 좌측 볼륨 (0~100)
-# - beepVolumeRight   : 우측 볼륨 (0~100)
-# - maxItems          : 사용자 운영 상한. 실제 상한은 MAX_ITEMS와 min() 결합.
-#                      v4부터 MAX_ITEMS는 BEEP_TABLE 크기와 디커플(128).
 # - debugLogging      : event_gainFocus 진단 로그. Ctrl+Tab/오버레이 classname 추적용.
 #                      기본 False. 켜면 NVDA 로그(%APPDATA%\\nvda\\nvda.log)에 한 줄씩 기록.
 CONFSPEC = {
     "beepDuration": "integer(default=50, min=20, max=500)",
     "beepGapMs": "integer(default=100, min=0, max=200)",
-    "beepVolumeLeft": "integer(default=50, min=0, max=100)",
-    "beepVolumeRight": "integer(default=50, min=0, max=100)",
-    "maxItems": f"integer(default={MAX_ITEMS}, min=1, max={MAX_ITEMS})",
     "debugLogging": "boolean(default=False)",
 }
+
+# 과거 버전 confspec에 있었으나 의미가 사라져 제거된 키 목록.
+# - beepVolumeLeft/Right : 좌/우 채널 볼륨(0~100). 사용자가 항상 50/50로 운용 →
+#                          tones SDK 기본값과 동일 동작이라 제거.
+# - maxItems             : 사용자 운영 상한(1~128). v7 BEEP_TABLE_SIZE(35) ↔
+#                          MAX_ITEMS(128) 디커플 + 비프 변별이 BEEP_TABLE 안에서
+#                          끝나서 사용자가 줄일 실용 이유 없음. MAX_ITEMS 상수만으로
+#                          하드 상한 충분.
+# register()에서 1회성으로 nvda.ini 잔재를 정리한다(다음 NVDA 종료 시 디스크 반영).
+_OBSOLETE_KEYS = ("beepVolumeLeft", "beepVolumeRight", "maxItems")
 
 
 # 스펙 타입 → 파이썬 변환기. CONFSPEC에서 새 타입을 도입하면 여기도 확장.
@@ -85,6 +88,19 @@ def register() -> None:
     for key, spec_str in CONFSPEC.items():
         if key not in section:
             section[key] = _parse_default(spec_str)
+    # 과거 버전에서 박힌 obsolete 키 제거. configobj가 spec 외 키를 무시하긴 하지만
+    # nvda.ini에는 그대로 남아 지원 인력이 봤을 때 혼란을 준다. 명시 리스트만
+    # 처리해 다른 도구/사용자 수동 추가 키는 보호한다. 멱등.
+    purged = []
+    for key in _OBSOLETE_KEYS:
+        if key in section:
+            try:
+                del section[key]
+                purged.append(key)
+            except KeyError:
+                pass
+    if purged:
+        log.info(f"mtwn: purged obsolete config keys: {purged}")
 
 
 def get(key: str):

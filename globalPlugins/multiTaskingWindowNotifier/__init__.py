@@ -218,9 +218,10 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
                 return
             new_key = makeAppKey(appId)
 
-        # 사용자 설정 상한과 하드 상한(BEEP_TABLE 길이) 중 작은 값을 적용
-        effective_max = min(settings.get("maxItems"), MAX_ITEMS)
-        if len(self.appList) >= effective_max:
+        # 하드 상한(MAX_ITEMS=128) 적용. v7부터 사용자 운영 상한 슬라이더 제거 —
+        # BEEP_TABLE_SIZE(35)와 디커플되어 있고 비프 변별이 BEEP_TABLE 안에서 끝나서
+        # 사용자가 직접 줄일 실용 이유가 없다.
+        if len(self.appList) >= MAX_ITEMS:
             ui.message(
                 "목록이 가득 찼어요. 몇 개 지우고 다시 시도해 주세요.",
                 speechPriority=speech.Spri.NEXT,

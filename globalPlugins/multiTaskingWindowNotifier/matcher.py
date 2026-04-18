@@ -112,7 +112,9 @@ class Matcher:
             # title 역매핑 → 실제 entry 문자열로 변환 (record_switch는 entry 키가 필요)
             idx = window_lookup[title]
             matched_key, scope = app_list[idx], SCOPE_WINDOW
-        elif appId in app_lookup:
+        elif appId and appId in app_lookup:
+            # appId="" → Alt+Tab 오버레이 후보처럼 obj.appId가 실제 앱이 아닌 케이스.
+            # focusDispatcher가 신뢰 불가 표시로 빈 문자열을 넘기므로 app_lookup skip.
             matched_key, scope = appId, SCOPE_APP
 
         if matched_key is None:
@@ -135,8 +137,6 @@ class Matcher:
             app_idx, tab_idx, scope,
             duration=settings.get("beepDuration"),
             gap_ms=settings.get("beepGapMs"),
-            left=settings.get("beepVolumeLeft"),
-            right=settings.get("beepVolumeRight"),
         )
         appListStore.record_switch(plugin.appListFile, matched_key)
         plugin._flush_scheduler.notify_switch()
