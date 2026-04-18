@@ -264,7 +264,7 @@ multiTaskingWindowNotifier/
 
 ## 핵심 로직
 ### 앱 식별
-- `getAppId(obj)`: `obj.appModule.appName` 또는 `windowClassName` 사용
+- `getAppId(obj)`: `appModuleHandler.getAppModuleForNVDAObject(obj).appName` 경유. 실패 시 `windowClassName`, 그마저 비면 `"unknown"`.
 - `makeKey(appId, title)`: `appId|title` 형식의 복합키 생성
 - `splitKey(entry)`: 복합키 파싱, 구형 포맷 호환
 - `normalize_title(name)`: 꼬리 " - 앱명" 한 덩이 제거. Alt+Tab obj.name, editor fg.name, MRU obj.name이 같은 형태로 떨어지게 함.

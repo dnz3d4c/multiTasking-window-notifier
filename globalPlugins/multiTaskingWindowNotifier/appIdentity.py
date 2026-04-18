@@ -7,13 +7,25 @@ from logHandler import log
 
 
 def getAppId(obj) -> str:
-    """앱 식별자 결정: 기본은 appModule.appName. 비어 있으면 windowClassName."""
+    """앱 식별자 결정.
+
+    NVDA 공식 진입점 `appModuleHandler.getAppModuleForNVDAObject(obj)` 경유로
+    얻은 `appModule.appName`을 사용한다. NVDA가 appModule을 캐싱·override하는
+    경로를 존중하기 위함. 실패 시 `windowClassName`, 그마저 비면 `"unknown"`.
+
+    import는 함수 내부: `appModuleHandler`가 `config`/`winUser`를 끌어오는
+    무거운 모듈이라 모듈 로드 시점 순환 위험이 있다. Python 캐시가 2회 이후
+    호출을 처리하므로 고빈도 경로 오버헤드는 미미.
+    """
     appId = ""
     try:
-        appId = getattr(getattr(obj, "appModule", None), "appName", "") or ""
+        import appModuleHandler  # noqa: WPS433 (의도적 지역 import)
+
+        appModule = appModuleHandler.getAppModuleForNVDAObject(obj)
+        if appModule is not None:
+            appId = getattr(appModule, "appName", "") or ""
     except Exception:
-        log.debug("mtwn: getAppId appModule.appName access failed", exc_info=True)
-        appId = ""
+        log.debug("mtwn: getAppModuleForNVDAObject failed", exc_info=True)
     if not appId:
         appId = getattr(obj, "windowClassName", "") or "unknown"
     return appId

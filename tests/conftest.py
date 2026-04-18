@@ -45,8 +45,17 @@ for _name in [
     "scriptHandler",
     "config",
     "controlTypes",
+    "appModuleHandler",
 ]:
     _mock_module(_name)
+
+
+# appModuleHandler.getAppModuleForNVDAObject: 기본 반환을 `obj.appModule`로 세팅.
+# 기존 테스트들이 `focus.appModule.appName = "..."` 방식으로 fixture를 구성해 왔으므로
+# 이 호환 경로가 있어야 Phase 1 이후에도 기존 fixture가 그대로 통과한다.
+sys.modules["appModuleHandler"].getAppModuleForNVDAObject = lambda obj: getattr(
+    obj, "appModule", None
+)
 
 
 # globalVars: appArgs.configPath 속성 접근이 필요.
