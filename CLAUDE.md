@@ -46,7 +46,7 @@
 1. `uv run python build.py` — `manifest.ini` + `globalPlugins/`를 묶어 `multiTaskingWindowNotifier-<version>.nvda-addon` 생성
 2. NVDA 메뉴 → 도구 → 애드온 스토어 → "외부 파일로부터 애드온 설치" → 생성된 `.nvda-addon` 선택
 3. NVDA 재시작
-4. (필요 시) 기존 사용자 데이터 이식: `tmp_merged_app.list` 류 병합 파일을 `%APPDATA%\nvda\addons\multiTaskingWindowNotifier\globalPlugins\multiTaskingWindowNotifier\app.list`에 복사 후 NVDA 재시작 (마이그레이션은 `appListStore._load_state`가 알아서 함)
+4. (필요 시) 기존 사용자 데이터 이식: `tmp_merged_app.list` 류 병합 파일을 `%APPDATA%\nvda\addons\multiTaskingWindowNotifier\globalPlugins\multiTaskingWindowNotifier\app.list`에 복사 후 NVDA 재시작 (마이그레이션은 `store.core._load_state`가 알아서 함)
 
 ## 설치 구조 검증 체크리스트
 
@@ -166,16 +166,30 @@ multiTaskingWindowNotifier/
 ├── manifest.ini                           # 추가 기능 메타정보
 └── globalPlugins/
     └── multiTaskingWindowNotifier/
-        ├── __init__.py                    # GlobalPlugin + 스크립트/이벤트 훅
+        ├── __init__.py                    # GlobalPlugin + 이벤트 훅 진입점 (+ ScriptsMixin 결합)
         ├── constants.py                   # ADDON_NAME, MAX_ITEMS(128), BEEP_TABLE(C major 온음계 35음), BEEP_TABLE_SIZE(35)
         ├── appIdentity.py                 # 앱 식별/복합키 + normalize_title
-        ├── appListStore.py                # v7 JSON 저장소 (appBeepMap, tabBeepIdx, 순차 할당)
+        ├── store/                         # v7 JSON 저장소 서브패키지 (Phase 3 분해)
+        │   ├── __init__.py                # 공개 API 재export (load/save/record_switch/flush/…)
+        │   ├── core.py                    # _load_state + 11개 공개 API 본체
+        │   ├── io.py                      # JSON I/O + 원자적 저장
+        │   ├── assign.py                  # 순차 비프 인덱스 할당
+        │   └── migrations/                # 버전별 마이그레이션 (1파일 = 1버전 전환)
+        │       ├── legacy_list.py         # ③ app.list → JSON
+        │       ├── normalize_titles.py    # ⑤ title 정규화 + dedup
+        │       └── v6_to_v7_beep_reassign.py  # ⑥ v7 재배정 clear
         ├── tabClasses.py                  # 앱별 editor/overlay wcn 매핑 + 자동 학습
         ├── windowInfo.py                  # 창 정보·경로 헬퍼 (title normalize 적용)
         ├── beepPlayer.py                  # v4 2음 비프 (core.callLater 기반 gap 예약)
         ├── listDialog.py                  # 목록 표시 wx.Dialog
         ├── settings.py                    # NVDA config 스키마 (confspec)
         ├── settingsPanel.py               # NVDA 설정 > 창 전환 알림 패널
+        ├── focusDispatcher.py             # event_gainFocus 3분기 판정
+        ├── nameChangeWatcher.py           # event_nameChange 탭 확정 감지
+        ├── matcher.py                     # 매칭 + 비프 재생 + 시그니처 dedup
+        ├── lookupIndex.py                 # windowLookup / appLookup 재구성
+        ├── switchFlusher.py               # 디바운스 flush 스케줄러
+        ├── scripts.py                     # ScriptsMixin (@script 4개 + 보조 헬퍼)
         ├── app.json                       # 앱·창 목록 + 메타(switchCount 등). 구형 app.list는 로드 시 마이그레이션
         └── tabClasses.json                # 앱별 editor/overlay wcn. 없으면 기본값으로 자동 생성
 ```
@@ -196,7 +210,7 @@ multiTaskingWindowNotifier/
   - 각 분기의 raw title은 `normalize_title`을 거쳐 꼬리 " - 앱명" 서픽스를 제거한 뒤 매칭. appId가 복합키 1등이라 title에 앱명 중복 저장하지 않는다.
   - 같은 키 0.3초 내 재매칭은 `_MATCH_DEDUP_SEC` 가드로 한 번만.
 - **파일 저장소**
-  - `appListStore` 모듈: 앱 목록 + 메타 JSON I/O. 모듈 수준 캐시(`_states`)로 상태 유지, `record_switch`/`flush`로 디바운스 저장. `_load_state`에서 title normalize 자동 마이그레이션 수행.
+  - `store` 서브패키지(Phase 3에서 분해): 앱 목록 + 메타 JSON I/O. `store.core._states` 모듈 캐시로 상태 유지, `store.record_switch`/`store.flush`로 디바운스 저장. `store.core._load_state`에서 title normalize + v7 재배정 자동 마이그레이션 수행. I/O는 `store.io`, 비프 할당은 `store.assign`, 버전 전환은 `store.migrations.*`가 담당.
   - `tabClasses` 모듈: 앱별 editor/overlay wcn 세트. `load()`가 DEFAULT와 합집합 병합, `is_*_class`는 캐시 set 조회(고빈도), `learn_editor`는 등록 성공 훅에서 best-effort 호출.
 
 ## 데이터 포맷
@@ -230,7 +244,7 @@ multiTaskingWindowNotifier/
 - **메타 필드**
   - `key` / `appId` / `title` — scope=app은 title이 빈 문자열
   - `registeredAt` / `switchCount` / `lastSeenAt` — 등록/사용 메타
-- **title 정규화** (Phase B): 등록 시점(`windowInfo.get_current_window_info`)과 로드 시점(`appListStore._load_state`) 모두 `normalize_title`을 거쳐 꼬리 " - 앱명" 한 덩이 제거.
+- **title 정규화** (Phase B): 등록 시점(`windowInfo.get_current_window_info`)과 로드 시점(`store.core._load_state`) 모두 `normalize_title`을 거쳐 꼬리 " - 앱명" 한 덩이 제거.
 - **v6 → v7 자동 마이그레이션**: 반음 64음 테이블(v6)에서 C major 온음계 35음(v7)으로 교체되며 인덱스 의미 자체가 달라진다. 로드 시 기존 appBeepMap/tabBeepIdx를 전부 버리고 순차 재배정 후 `version=7`로 저장. 1회성, 사용자는 주파수 재학습 필요.
 - **v5 이하 자동 마이그레이션**: 거리 최대화 방식(v4/v5)도 동일 경로로 한 번에 v7까지 끌어올려 재배정.
 - **v3 이하 자동 마이그레이션**: appBeepMap/tabBeepIdx 필드가 부재하면 동일 재배정 경로로 v7 할당 채움.
@@ -254,7 +268,7 @@ multiTaskingWindowNotifier/
 
 ### 하위호환: app.list
 - 구형 텍스트 포맷(한 줄당 `appId|title` 또는 `title`만).
-- `app.json`이 없고 `app.list`가 있으면 `appListStore.load()`가 자동 마이그레이션.
+- `app.json`이 없고 `app.list`가 있으면 `store.load()`가 자동 마이그레이션.
 - 마이그레이션 완료 시 원본은 `app.list.bak`으로 이름 변경해 보존.
 
 ### 디바운스 저장 규약 (`__init__.py`)
