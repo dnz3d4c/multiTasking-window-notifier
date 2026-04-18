@@ -8,7 +8,6 @@
 #   ※ 위 두 항목은 아직 미구현. 구조 영향 적음. 추후 필요 시 추가.
 
 import os
-import time
 import wx
 import api
 import ui
@@ -27,6 +26,8 @@ from .windowInfo import config_addon_dir, get_current_window_info
 from .beepPlayer import play_beep
 from .listDialog import AppListDialog
 from .settingsPanel import MultiTaskingSettingsPanel
+from .switchFlusher import FlushScheduler
+from .lookupIndex import LookupIndex
 
 # 번역 초기화(선택)
 try:
@@ -40,10 +41,6 @@ except Exception:
 
 class GlobalPlugin(globalPluginHandler.GlobalPlugin):
     """전역 플러그인: 지정한 창(appName|제목)에 포커스가 오면 비프음 알림"""
-
-    # 전환 카운트 디바운스 저장 임계치
-    _FLUSH_INTERVAL_SEC = 30
-    _FLUSH_EVERY_N = 10
 
     def __init__(self):
         super().__init__()
@@ -70,16 +67,12 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
             tabClasses.load(self.tabClassesFile)
         except Exception:
             log.exception("mtwn: tabClasses load failed — overlay branch disabled")
-        # scope=window 매칭용 사전: 복합키(appId|title)와 title-only 역매핑 모두 보유.
-        # title-only 역매핑은 Alt+Tab 오버레이 케이스에서 obj의 appId가 explorer 등으로
-        # 찍혀 신형 키 매칭이 깨질 때 fallback으로 쓰인다.
-        self.windowLookup = {}
-        # scope=app 매칭용 사전: appId만 키로. windowLookup이 모두 미스일 때 fallback.
-        self.appLookup = {}
+        # 매칭용 룩업 인덱스. windowLookup/appLookup 두 dict는 LookupIndex가 소유하고,
+        # GlobalPlugin은 property로 read-only 노출(기존 테스트 호환).
+        self._lookup = LookupIndex(meta_provider=self._meta_for)
         self._rebuild_lookup()
-        # 전환 카운트 디바운스 저장 상태
-        self._lastFlushAt = time.monotonic()
-        self._switchesSinceFlush = 0
+        # 전환 카운트 디바운스 저장: switchFlusher가 카운터/타이머 상태 캡슐화.
+        self._flush_scheduler = FlushScheduler(appListStore.flush, self.appListFile)
         # 시그니처 기반 dedup — (appId, title, tab_sig)가 연속으로 같으면 skip.
         # 확정 탭 전환은 title 또는 tab_sig(hwnd)가 바뀌므로 자연 통과하고,
         # 같은 탭 자식 컨트롤 재진입 같은 이벤트 중복 폭주만 흡수한다.
@@ -115,18 +108,6 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
             log.exception("mtwn: settings panel unregister failed")
         super().terminate()
 
-    def _maybe_flush_switches(self):
-        """디바운스: N회 전환 또는 일정 시간 경과 시 디스크 반영."""
-        now = time.monotonic()
-        if (self._switchesSinceFlush >= self._FLUSH_EVERY_N
-                or (now - self._lastFlushAt) >= self._FLUSH_INTERVAL_SEC):
-            try:
-                appListStore.flush(self.appListFile)
-            except Exception:
-                log.exception("mtwn: switch flush failed")
-            self._lastFlushAt = now
-            self._switchesSinceFlush = 0
-
     def _meta_for(self, entry):
         """디스크 메타에서 scope를 조회. 메타 없으면 기본 SCOPE_WINDOW로 간주.
 
@@ -136,37 +117,19 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
         meta = appListStore.get_meta(self.appListFile, entry) or {}
         return meta.get("scope", SCOPE_WINDOW)
 
-    def _rebuild_lookup(self):
-        """appList 변경 시 검색용 딕셔너리 재구성.
+    @property
+    def windowLookup(self):
+        """호환용 read-only 노출. 실제 소유자는 self._lookup."""
+        return self._lookup.windowLookup
 
-        windowLookup:
-            - 복합키(`appId|title`) → idx
-            - title-only 역매핑 → idx (Alt+Tab 오버레이에서 obj.appId가 explorer로
-              찍혀 정확 매치가 깨질 때 fallback)
-            - 구형 entry(title == entry, '|' 없음)는 자기 자신이 그대로 등록되어
-              자동 fallback 역할
-            - title 충돌 시 먼저 등록된 idx 우선 (`setdefault`)
-        appLookup:
-            - appId → idx (scope=app entry만)
-            - windowLookup이 모두 미스일 때 마지막 fallback. 매칭 우선순위 창 > 앱.
-        """
-        self.windowLookup = {}
-        self.appLookup = {}
-        for idx, entry in enumerate(self.appList):
-            scope = self._meta_for(entry)
-            if scope == SCOPE_APP:
-                # appId 자체가 key
-                self.appLookup.setdefault(entry, idx)
-                continue
-            # SCOPE_WINDOW
-            self.windowLookup[entry] = idx
-            _, title = splitKey(entry)
-            if title and title != entry:
-                self.windowLookup.setdefault(title, idx)
-        log.debug(
-            f"mtwn: _rebuild_lookup entries={len(self.appList)} "
-            f"window_keys={len(self.windowLookup)} app_keys={len(self.appLookup)}"
-        )
+    @property
+    def appLookup(self):
+        """호환용 read-only 노출. 실제 소유자는 self._lookup."""
+        return self._lookup.appLookup
+
+    def _rebuild_lookup(self):
+        """appList 변경 시 lookup 재구성. 실제 로직은 LookupIndex.rebuild."""
+        self._lookup.rebuild(self.appList)
 
     def _resolve_beep_pair(self, matched_key, scope, appId):
         """v4 (app_idx, tab_idx) 쌍 결정.
@@ -261,8 +224,8 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
             right=settings.get("beepVolumeRight"),
         )
         appListStore.record_switch(self.appListFile, matched_key)
-        self._switchesSinceFlush += 1
-        self._maybe_flush_switches()
+        self._flush_scheduler.notify_switch()
+        self._flush_scheduler.maybe_flush()
 
     # -------- 스크립트 --------
     # 기본 제스처는 데코레이터 gesture 파라미터로 선언
@@ -416,8 +379,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
         items = appListStore.reload(self.appListFile)
         self.appList = items
         self._rebuild_lookup()
-        self._lastFlushAt = time.monotonic()
-        self._switchesSinceFlush = 0
+        self._flush_scheduler.reset()
         ui.message(
             f"목록을 다시 불러왔어요. 지금 {len(items)}개예요.",
             speechPriority=speech.Spri.NEXT,
