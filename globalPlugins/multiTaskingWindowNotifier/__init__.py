@@ -14,7 +14,7 @@ import globalPluginHandler
 from logHandler import log
 
 from .constants import SCOPE_WINDOW
-from . import appListStore
+from . import store
 from . import settings
 from . import tabClasses
 from .windowInfo import config_addon_dir
@@ -60,7 +60,7 @@ class GlobalPlugin(ScriptsMixin, globalPluginHandler.GlobalPlugin):
         self.appDir = config_addon_dir()
         self.appListFile = os.path.join(self.appDir, "app.list")
         # 초기 1회만 로드
-        self.appList = appListStore.load(self.appListFile)
+        self.appList = store.load(self.appListFile)
 
         # 앱별 탭 컨트롤 wcn 매핑 로드. 파일이 없으면 DEFAULT_TAB_CLASSES로 자동 생성된다.
         # 로드 실패해도 애드온 기본 동작(Alt+Tab 매칭)은 유지되어야 하므로 예외는 삼킴.
@@ -74,7 +74,7 @@ class GlobalPlugin(ScriptsMixin, globalPluginHandler.GlobalPlugin):
         self._lookup = LookupIndex(meta_provider=self._meta_for)
         self._rebuild_lookup()
         # 전환 카운트 디바운스 저장: switchFlusher가 카운터/타이머 상태 캡슐화.
-        self._flush_scheduler = FlushScheduler(appListStore.flush, self.appListFile)
+        self._flush_scheduler = FlushScheduler(store.flush, self.appListFile)
         # 매칭 + 비프 재생 + 시그니처 dedup 캡슐화. dedup 상태(_last_event_sig)는
         # Matcher.last_event_sig에 있으며 아래 property로 테스트 호환 유지.
         self._matcher = Matcher(self)
@@ -83,7 +83,7 @@ class GlobalPlugin(ScriptsMixin, globalPluginHandler.GlobalPlugin):
         # ui.delayedMessage는 부팅 시 UI 변화에 묻히지 않도록 NVDA가 제공하는
         # 전용 헬퍼로, 기본 speechPriority가 Spri.NOW라 다른 음성 뒤에도 인터럽트
         # 로 반드시 전달된다.
-        if appListStore.is_corrupted(self.appListFile):
+        if store.is_corrupted(self.appListFile):
             log.info(f"mtwn: corruption alert queued path={self.appListFile!r}")
             ui.delayedMessage(
                 "앱 목록 파일이 손상되어 빈 상태로 시작했어요. "
@@ -93,7 +93,7 @@ class GlobalPlugin(ScriptsMixin, globalPluginHandler.GlobalPlugin):
     def terminate(self):
         """애드온 재로드/NVDA 종료 시 미저장 변경분 저장 + 설정 패널 해제."""
         try:
-            appListStore.flush(self.appListFile)
+            store.flush(self.appListFile)
         except Exception:
             log.exception("mtwn: terminate flush")
         try:
@@ -110,10 +110,10 @@ class GlobalPlugin(ScriptsMixin, globalPluginHandler.GlobalPlugin):
     def _meta_for(self, entry):
         """디스크 메타에서 scope를 조회. 메타 없으면 기본 SCOPE_WINDOW로 간주.
 
-        appListStore가 아직 로드 안 됐거나(부팅 직후) entry가 막 추가되어 메타가
+        store가 아직 로드 안 됐거나(부팅 직후) entry가 막 추가되어 메타가
         없을 수 있다. 그런 케이스에서도 안전하게 동작하도록 fallback.
         """
-        meta = appListStore.get_meta(self.appListFile, entry) or {}
+        meta = store.get_meta(self.appListFile, entry) or {}
         return meta.get("scope", SCOPE_WINDOW)
 
     @property

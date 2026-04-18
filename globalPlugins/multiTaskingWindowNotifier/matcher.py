@@ -11,7 +11,7 @@ Matcher는 GlobalPlugin 인스턴스를 참조해 다음을 조회한다:
     - plugin.appList            (idx → entry 역변환용)
     - plugin._lookup            (windowLookup / appLookup)
     - plugin._flush_scheduler   (notify_switch / maybe_flush)
-    - plugin.appListFile        (appListStore.record_switch 경로)
+    - plugin.appListFile        (store.record_switch 경로)
 
 역방향(Matcher → GlobalPlugin) 의존은 이 4개뿐. 반대는 없다.
 """
@@ -20,8 +20,8 @@ from __future__ import annotations
 
 from logHandler import log
 
-from . import appListStore
 from . import beepPlayer
+from . import store
 from . import settings
 from .appIdentity import makeKey, splitKey
 from .constants import SCOPE_APP, SCOPE_WINDOW
@@ -66,7 +66,7 @@ class Matcher:
             real_app_id = matched_key
         else:
             real_app_id, _ = splitKey(matched_key)
-        app_idx = appListStore.get_app_beep_idx(app_list_file, real_app_id)
+        app_idx = store.get_app_beep_idx(app_list_file, real_app_id)
         if app_idx is None:
             log.warning(
                 f"mtwn: appBeepMap miss appId={real_app_id!r} — falling back to 0"
@@ -75,7 +75,7 @@ class Matcher:
         if scope == SCOPE_APP:
             return app_idx, None
         # SCOPE_WINDOW
-        tab_idx = appListStore.get_tab_beep_idx(app_list_file, matched_key)
+        tab_idx = store.get_tab_beep_idx(app_list_file, matched_key)
         if tab_idx is None:
             log.warning(
                 f"mtwn: tabBeepIdx miss key={matched_key!r} — falling back to 0"
@@ -138,6 +138,6 @@ class Matcher:
             duration=settings.get("beepDuration"),
             gap_ms=settings.get("beepGapMs"),
         )
-        appListStore.record_switch(plugin.appListFile, matched_key)
+        store.record_switch(plugin.appListFile, matched_key)
         plugin._flush_scheduler.notify_switch()
         plugin._flush_scheduler.maybe_flush()

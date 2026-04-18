@@ -17,7 +17,7 @@
   마지막 fallback. 매칭 우선순위는 창 > 앱.
 
 scope 판정은 생성자에 주입된 `meta_provider(entry) -> scope` 콜백에 위임한다.
-GlobalPlugin의 `_meta_for`가 주입되며 내부에서 appListStore.get_meta를 조회.
+GlobalPlugin의 `_meta_for`가 주입되며 내부에서 store.get_meta를 조회.
 """
 
 from __future__ import annotations

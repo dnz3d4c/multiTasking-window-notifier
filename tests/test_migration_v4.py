@@ -13,7 +13,7 @@ v7 포맷: 테이블을 C major 온음계 35음으로 교체. v6 이하 파일�
 import json
 import os
 
-from globalPlugins.multiTaskingWindowNotifier import appListStore
+from globalPlugins.multiTaskingWindowNotifier import store
 from globalPlugins.multiTaskingWindowNotifier.constants import (
     BEEP_TABLE_SIZE,
     BEEP_USABLE_END,
@@ -56,7 +56,7 @@ def test_v3_window_only_gets_app_beep_map_and_tab_idx(tmp_path):
     ])
 
     list_path = _list_path(tmp_path)
-    keys = appListStore.load(list_path)
+    keys = store.load(list_path)
     assert keys == ["notepad|제목 없음"]
 
     data = _read_json(_json_path(tmp_path))
@@ -84,7 +84,7 @@ def test_v3_mixed_scope_migration_assigns_sequential_app_idx(tmp_path):
     ])
 
     list_path = _list_path(tmp_path)
-    appListStore.load(list_path)
+    store.load(list_path)
 
     app_map = _read_json(_json_path(tmp_path))["appBeepMap"]
     # 등록 순서: chrome → notepad. 각각 START, START+1 (반음 위).
@@ -110,7 +110,7 @@ def test_v3_multiple_windows_same_app_get_distinct_tab_idx(tmp_path):
     ])
 
     list_path = _list_path(tmp_path)
-    appListStore.load(list_path)
+    store.load(list_path)
 
     items = _read_json(_json_path(tmp_path))["items"]
     tab_indices = [it["tabBeepIdx"] for it in items]
@@ -140,7 +140,7 @@ def test_v3_multiple_apps_tabs_are_app_independent(tmp_path):
     ])
 
     list_path = _list_path(tmp_path)
-    appListStore.load(list_path)
+    store.load(list_path)
 
     data = _read_json(_json_path(tmp_path))
     # 앱 비프: chrome=0, notepad=1.
@@ -175,7 +175,7 @@ def test_v5_file_gets_reassigned_to_v7_sequential(tmp_path):
     })
 
     list_path = _list_path(tmp_path)
-    appListStore.load(list_path)
+    store.load(list_path)
 
     data = _read_json(json_path)
     assert data["version"] == 7
@@ -203,7 +203,7 @@ def test_v4_file_gets_reassigned_to_v7_range(tmp_path):
     })
 
     list_path = _list_path(tmp_path)
-    appListStore.load(list_path)
+    store.load(list_path)
 
     data = _read_json(json_path)
     assert data["version"] == 7
@@ -236,7 +236,7 @@ def test_v6_file_gets_reassigned_to_v7_sequential(tmp_path):
     })
 
     list_path = _list_path(tmp_path)
-    appListStore.load(list_path)
+    store.load(list_path)
 
     data = _read_json(json_path)
     assert data["version"] == 7
@@ -264,7 +264,7 @@ def test_v7_file_preserves_existing_assignments(tmp_path):
     })
 
     list_path = _list_path(tmp_path)
-    appListStore.load(list_path)
+    store.load(list_path)
 
     data = _read_json(json_path)
     assert data["version"] == 7
@@ -293,7 +293,7 @@ def test_v7_file_fills_partial_missing_fields(tmp_path):
     })
 
     list_path = _list_path(tmp_path)
-    appListStore.load(list_path)
+    store.load(list_path)
 
     data = _read_json(json_path)
     # 기존 값 보존.
@@ -309,12 +309,12 @@ def test_v7_file_fills_partial_missing_fields(tmp_path):
 def test_getters_return_assigned_indices(tmp_path):
     """get_app_beep_idx / get_tab_beep_idx 공개 API 동작 검증."""
     path = _list_path(tmp_path)
-    appListStore.save(path, ["chrome|Tab A", "notepad"],
+    store.save(path, ["chrome|Tab A", "notepad"],
                       scopes={"notepad": SCOPE_APP})
 
-    chrome_idx = appListStore.get_app_beep_idx(path, "chrome")
-    notepad_idx = appListStore.get_app_beep_idx(path, "notepad")
-    tab_a_idx = appListStore.get_tab_beep_idx(path, "chrome|Tab A")
+    chrome_idx = store.get_app_beep_idx(path, "chrome")
+    notepad_idx = store.get_app_beep_idx(path, "notepad")
+    tab_a_idx = store.get_tab_beep_idx(path, "chrome|Tab A")
 
     assert isinstance(chrome_idx, int) and 0 <= chrome_idx < BEEP_TABLE_SIZE
     assert isinstance(notepad_idx, int) and 0 <= notepad_idx < BEEP_TABLE_SIZE
@@ -325,8 +325,8 @@ def test_getters_return_assigned_indices(tmp_path):
 def test_get_tab_beep_idx_returns_none_for_app_scope(tmp_path):
     """scope=app entry는 tabBeepIdx 없음 → None."""
     path = _list_path(tmp_path)
-    appListStore.save(path, ["chrome"], scopes={"chrome": SCOPE_APP})
-    assert appListStore.get_tab_beep_idx(path, "chrome") is None
+    store.save(path, ["chrome"], scopes={"chrome": SCOPE_APP})
+    assert store.get_tab_beep_idx(path, "chrome") is None
 
 
 def test_invalid_beep_map_value_is_reassigned(tmp_path):
@@ -348,7 +348,7 @@ def test_invalid_beep_map_value_is_reassigned(tmp_path):
     })
 
     list_path = _list_path(tmp_path)
-    appListStore.load(list_path)
+    store.load(list_path)
 
     data = _read_json(json_path)
     chrome_idx = data["appBeepMap"].get("chrome")
@@ -372,15 +372,15 @@ def test_v4_reassignment_not_repeated_after_first_load(tmp_path):
     })
 
     list_path = _list_path(tmp_path)
-    appListStore.load(list_path)
+    store.load(list_path)
     first_data = _read_json(json_path)
     first_chrome = first_data["appBeepMap"]["chrome"]
     first_tab = first_data["items"][0]["tabBeepIdx"]
 
     # 프로세스 재시작 시뮬레이션
-    appListStore.reset_cache()
+    store.reset_cache()
 
-    appListStore.load(list_path)
+    store.load(list_path)
     second_data = _read_json(json_path)
     assert second_data["version"] == 7
     assert second_data["appBeepMap"]["chrome"] == first_chrome

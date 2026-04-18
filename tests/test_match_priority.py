@@ -10,7 +10,7 @@ from unittest.mock import MagicMock
 import pytest
 from configobj import ConfigObj
 
-from globalPlugins.multiTaskingWindowNotifier import appListStore
+from globalPlugins.multiTaskingWindowNotifier import store
 from globalPlugins.multiTaskingWindowNotifier.constants import SCOPE_APP, SCOPE_WINDOW
 
 
@@ -52,7 +52,7 @@ def _seed(plugin, items):
     """디스크에 (key, scope) 리스트로 등록 후 메모리 동기화."""
     keys = [k for k, _ in items]
     scopes = {k: s for k, s in items}
-    appListStore.save(plugin.appListFile, keys, scopes=scopes)
+    store.save(plugin.appListFile, keys, scopes=scopes)
     plugin.appList = list(keys)
     plugin._rebuild_lookup()
 
@@ -247,7 +247,7 @@ def test_title_only_reverse_mapping_uses_real_app_beep(plugin, monkeypatch):
 
     assert calls == [(BEEP_USABLE_START, BEEP_USABLE_START, SCOPE_WINDOW)]
     # 메타가 정확히 "notepad|Memo" entry에 기록되었는지 확인
-    meta = appListStore.get_meta(plugin.appListFile, "notepad|Memo")
+    meta = store.get_meta(plugin.appListFile, "notepad|Memo")
     assert meta["switchCount"] == 1
 
 

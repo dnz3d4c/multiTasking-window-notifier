@@ -29,7 +29,7 @@ import speech
 from logHandler import log
 from scriptHandler import script
 
-from . import appListStore
+from . import store
 from .appIdentity import makeAppKey
 from .constants import MAX_ITEMS, SCOPE_APP, SCOPE_WINDOW
 from .listDialog import AppListDialog
@@ -139,7 +139,7 @@ class ScriptsMixin:
             return
 
         self.appList.append(new_key)
-        if not appListStore.save(self.appListFile, self.appList, scopes={new_key: scope}):
+        if not store.save(self.appListFile, self.appList, scopes={new_key: scope}):
             self.appList.pop()
             ui.message(
                 "앱 목록을 저장하는 중 문제가 생겼어요. 다시 시도해 주세요.",
@@ -182,7 +182,7 @@ class ScriptsMixin:
             ui.message("목록에 없는 항목이에요.", speechPriority=speech.Spri.NEXT)
             return
 
-        if not appListStore.save(self.appListFile, self.appList):
+        if not store.save(self.appListFile, self.appList):
             self.appList = original
             ui.message(
                 "앱 목록을 저장하는 중 문제가 생겼어요. 다시 시도해 주세요.",
@@ -202,7 +202,7 @@ class ScriptsMixin:
     )
     def script_reloadAppList(self, gesture=None):
         # reload는 미저장 변경분을 먼저 flush한 뒤 캐시 무효화 후 재로드한다.
-        items = appListStore.reload(self.appListFile)
+        items = store.reload(self.appListFile)
         self.appList = items
         self._rebuild_lookup()
         self._flush_scheduler.reset()
@@ -249,7 +249,7 @@ class ScriptsMixin:
         if not entries:
             return True
         new_list = [e for e in self.appList if e not in entries]
-        if not appListStore.save(self.appListFile, new_list):
+        if not store.save(self.appListFile, new_list):
             return False
         self.appList = new_list
         self._rebuild_lookup()

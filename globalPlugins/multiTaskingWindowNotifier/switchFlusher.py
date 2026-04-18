@@ -27,7 +27,7 @@ class FlushScheduler:
     """전환 카운트 디바운스 flush 담당.
 
     Args:
-        flush_fn: `flush(app_list_file)` 시그니처 callable. 보통 `appListStore.flush`.
+        flush_fn: `flush(app_list_file)` 시그니처 callable. 보통 `store.flush`.
         app_list_file: flush 대상 app.json 경로.
         every_n: 이 횟수만큼 전환이 누적되면 즉시 flush.
         interval_sec: 누적 수와 무관하게 이 초가 경과했으면 flush.

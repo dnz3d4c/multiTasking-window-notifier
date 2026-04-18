@@ -113,14 +113,14 @@ sys.modules["logHandler"].log = MagicMock(name="logHandler.log")
 
 @pytest.fixture(autouse=True)
 def _reset_addon_state(monkeypatch, tmp_path):
-    """매 테스트마다 appListStore 캐시를 초기화하고 configPath를 tmp_path로 격리.
+    """매 테스트마다 store 캐시를 초기화하고 configPath를 tmp_path로 격리.
 
     사용자 실제 NVDA 설정 경로를 보호하기 위해 반드시 autouse로 돈다.
     """
     # 지연 import: sys.modules 스텁이 모두 주입된 이후여야 안전.
-    from globalPlugins.multiTaskingWindowNotifier import appListStore
+    from globalPlugins.multiTaskingWindowNotifier import store
 
-    appListStore.reset_cache()
+    store.reset_cache()
     monkeypatch.setattr(
         sys.modules["globalVars"].appArgs,
         "configPath",
@@ -128,4 +128,4 @@ def _reset_addon_state(monkeypatch, tmp_path):
         raising=False,
     )
     yield
-    appListStore.reset_cache()
+    store.reset_cache()

@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 # GNU General Public License v2.0-or-later
 
-"""앱 목록 + 메타데이터 저장소.
+"""앱 목록 + 메타데이터 저장소 — 핫 패스 API 본체.
 
 파일 포맷 (`app.json`, version=7):
     {
@@ -20,29 +20,6 @@
       ]
     }
 
-v7 변경점 (v6 대비):
-    - `BEEP_TABLE`을 반음 64음에서 C major 온음계 35음(7음 × 5옥타브)으로 교체.
-      같은 appBeepMap/tabBeepIdx 구조지만 인덱스가 가리키는 주파수가 달라지고
-      상한도 64→35로 축소. 기존 v6 파일은 로드 시 기존 할당을 전부 폐기하고
-      순차 재할당된 뒤 version=7로 저장된다(1회성, 이후 반복 없음).
-
-v6 변경점 (v5 대비):
-    - 할당 알고리즘을 "거리 최대화"에서 "등록 순서 기반 순차"로 교체.
-      앱 A=0, 앱 B=1, 앱 C=2 ... 한 슬롯씩 상승. 탭도 appId별 독립 카운터로 0부터.
-      사용자 인지 모델("1번 다음은 2번") 유지 + 앱·탭 변별은 scope 분기된 재생
-      구조(a단음 vs a→gap→b 2음)로 담보.
-    - 삭제로 생긴 중간 gap은 재사용하지 않음 — max(used)+1 규칙으로 새 idx가
-      항상 증가해 등록 순서 추적 가능.
-
-구조 (v4부터 유지):
-    - top-level `appBeepMap` — appId → BEEP_TABLE 인덱스. 같은 appId의 모든
-      scope=window entry가 공유하는 "앱 비프"(a). scope=app entry가 없어도
-      자동 할당되어 모든 appId가 항상 base 음을 가진다.
-    - scope=window entry에 `tabBeepIdx` 필드 — 같은 appId 내에서 고유한 "탭
-      비프"(b). scope=app entry는 tabBeepIdx를 갖지 않음(단음 재생).
-    - entry 리스트 idx와 비프 idx가 완전 분리 — 중간 entry 삭제가 다른 entry의
-      주파수에 영향 없음.
-
 하위 호환:
     - v6 (반음 64음 테이블): 로드 시 기존 할당을 모두 버리고 v7 온음계 35음
       테이블 기준으로 순차 재할당. 1회성, 사용자는 주파수 재학습 필요.
@@ -53,51 +30,45 @@ v6 변경점 (v5 대비):
       모든 줄을 scope="window"로 등록 + 순차 할당 후 `app.list.bak`으로 백업.
     - 새 설치(둘 다 없음)는 빈 목록으로 시작.
 
-외부 API (기존 호출부 호환):
+외부 API:
     load(path)               -> list[str]    key 리스트만 반환
-    save(path, keys)         -> None          keys 순서 저장 (기존 메타 보존)
-    record_switch(path, key) -> None          메모리 switchCount/lastSeenAt 갱신 (dirty 플래그)
-    flush(path)              -> None          dirty 상태면 디스크 쓰기 (원자적)
+    save(path, keys, scopes) -> bool         keys 순서 저장 (기존 메타 보존)
+    record_switch(path, key) -> None         메모리 switchCount/lastSeenAt 갱신
+    flush(path)              -> bool         dirty 상태면 디스크 쓰기 (원자적)
     reload(path)             -> list[str]    flush 후 캐시 무효화 + 재로드
     get_meta(path, key)      -> dict|None    항목 메타 조회
-    get_app_beep_idx(path, appId) -> int|None  appBeepMap 조회 (v4)
-    get_tab_beep_idx(path, key)   -> int|None  scope=window entry의 tabBeepIdx (v4)
+    get_app_beep_idx(path, appId) -> int|None  appBeepMap 조회
+    get_tab_beep_idx(path, key)   -> int|None  scope=window entry의 tabBeepIdx
+    is_corrupted(path)       -> bool         app.json 손상 감지 플래그
     prune_stale(path, iso)   -> list[str]    (#7 창 닫기 알림 기능 대비)
+    reset_cache()            -> None         pytest autouse fixture 전용
 
 path 인자는 기존 `app.list` 경로를 그대로 받는다. 내부에서 같은 디렉터리의
 `app.json`으로 변환해 사용하므로 호출부는 수정 불필요.
+
+책임 분리 (Phase 3):
+    - store.io: 경로/시간/메타 헬퍼 + JSON I/O + 원자적 저장
+    - store.assign: 순차 비프 인덱스 할당
+    - store.migrations.legacy_list: app.list → JSON
+    - store.migrations.normalize_titles: title 정규화 + dedup
+    - store.migrations.v6_to_v7_beep_reassign: v7 재배정 clear
+    - 본 모듈: 위 레이어를 엮는 핫 패스 API와 `_load_state` 선형 파이프라인.
 """
 
 import os
 
 from logHandler import log
 
-from .appIdentity import makeKey, normalize_title, splitKey
-from .constants import (
+from ..constants import (
     BEEP_TABLE_SIZE,
-    BEEP_USABLE_SIZE,
-    BEEP_USABLE_START,
     MAX_ITEMS,
-    SCOPE_APP,
     SCOPE_WINDOW,
 )
-from .store.assign import _assign_next_idx, _ensure_beep_assignments
-from .store.io import (
-    _bak_path,
-    _json_path,
-    _load_from_json,
-    _new_meta,
-    _now_iso,
-    _save_to_disk,
-)
-from .store.migrations.legacy_list import _backup_legacy_list, _migrate_from_list
-from .store.migrations.normalize_titles import (
-    _dedup_items,
-    _mark_dirty_if_changed,
-    _normalize_items,
-    _normalize_titles_in_place,
-)
-from .store.migrations.v6_to_v7_beep_reassign import clear_pre_v7_assignments
+from .assign import _ensure_beep_assignments
+from .io import _json_path, _load_from_json, _new_meta, _now_iso, _save_to_disk
+from .migrations.legacy_list import _backup_legacy_list, _migrate_from_list
+from .migrations.normalize_titles import _normalize_titles_in_place
+from .migrations.v6_to_v7_beep_reassign import clear_pre_v7_assignments
 
 # 본 모듈은 데이터 레이어다. 실패 시 `log`로만 보고하고 `ui.message`는 호출하지 않는다.
 # 사용자 대면 알림은 상위 레이어(__init__.py의 script_* 등)에서 반환값으로 판단해 처리.
@@ -107,7 +78,7 @@ from .store.migrations.v6_to_v7_beep_reassign import clear_pre_v7_assignments
 # 상태 형태:
 #   {
 #     "items": list[dict],       # 각 entry 메타. scope=window는 tabBeepIdx 포함
-#     "appBeepMap": dict,        # appId → BEEP_TABLE idx (v4). 같은 appId entry들이 공유
+#     "appBeepMap": dict,        # appId → BEEP_TABLE idx. 같은 appId entry들이 공유
 #     "dirty": bool,             # 미저장 변경 유무
 #     "corrupted": bool,         # 손상된 app.json 감지 플래그
 #   }
@@ -124,10 +95,6 @@ def reset_cache() -> None:
     _states.clear()
 
 
-# 경로/시간/메타 헬퍼와 JSON 역직렬화·원자적 저장은 `store.io`에서 관리한다.
-# 본 모듈 상단의 import 블록에서 재export한다(Phase 3.2).
-
-
 def _load_state(list_path: str) -> dict:
     """캐시를 우선 반환. 캐시 미스 시 아래 선형 단계로 상태 복원.
 
@@ -140,7 +107,7 @@ def _load_state(list_path: str) -> dict:
       ③ JSON 로드 또는 legacy `app.list` 마이그레이션
       ④ legacy 백업 — 신뢰 가능한 JSON이 확보된 경우만 1회
       ⑤ title normalize 마이그레이션 ("제목 없음 - 메모장" → "제목 없음")
-      ⑥ v3→v4 비프 할당 마이그레이션 (appBeepMap + tabBeepIdx 자동 채움)
+      ⑥ v6 이하 → v7 비프 할당 재배정 + 자동 채움
       ⑦ 캐시 등록
     """
     # ① 캐시
@@ -148,7 +115,7 @@ def _load_state(list_path: str) -> dict:
         return _states[list_path]
 
     # source_version: 디스크에서 읽어 온 원본 버전. 새 설치/legacy 마이그레이션은 0.
-    # v5 이상이면 ⑥단계 강제 재배정을 건너뛴다(이미 새 범위로 안정된 파일).
+    # v7 이상이면 ⑥단계 clear를 건너뛴다(이미 새 테이블 기준 안정된 파일).
     state = {
         "items": [], "appBeepMap": {}, "dirty": False, "corrupted": False,
         "source_version": 0,
@@ -185,7 +152,7 @@ def _load_state(list_path: str) -> dict:
         if migrated:
             state["items"] = migrated
             state["dirty"] = True
-            # 비프 할당을 먼저 채워 두고 저장 (디스크에 v6 포맷으로 기록).
+            # 비프 할당을 먼저 채워 두고 저장 (디스크에 v7 포맷으로 기록).
             _ensure_beep_assignments(state)
             if _save_to_disk(list_path, state):
                 state["dirty"] = False
