@@ -496,36 +496,77 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 
     # -------- 이벤트 훅 --------
 
+    def _log_focus_diag(self, obj):
+        """debugLogging=True 진단 로그. 본 로직 침범 방지를 위해 전용 try/except로 격리.
+
+        Ctrl+Tab 등에서 비프가 안 나는 원인을 실측으로 특정하기 위한 일회성 기록.
+        NVDA 로그에 한 줄/이벤트로 남는다. settings.get("debugLogging")이 True일
+        때만 event_gainFocus가 호출하므로 off 상태에선 함수 호출 자체 없음.
+        """
+        try:
+            wcn = getattr(obj, "windowClassName", "") if obj is not None else ""
+            obj_name = (getattr(obj, "name", "") or "") if obj is not None else ""
+            role = getattr(obj, "role", "") if obj is not None else ""
+            parent = getattr(obj, "parent", None) if obj is not None else None
+            parent_wcn = getattr(parent, "windowClassName", "") if parent is not None else ""
+            fg = api.getForegroundObject()
+            fg_wcn = getattr(fg, "windowClassName", "") if fg is not None else ""
+            fg_name = (getattr(fg, "name", "") or "") if fg is not None else ""
+            try:
+                obj_app = getAppId(obj) if obj is not None else ""
+            except Exception:
+                obj_app = "<err>"
+            log.info(
+                f"mtwn: DBG gF wcn={wcn!r} name={obj_name!r} role={role!r} "
+                f"parentWcn={parent_wcn!r} fgWcn={fg_wcn!r} fgName={fg_name!r} "
+                f"appId={obj_app!r}"
+            )
+        except Exception:
+            log.exception("mtwn: debug log failed")
+
+    def _determine_match_source(self, obj, wcn, appId, fg, fg_wcn):
+        """event_gainFocus 4분기 판정. 매칭 대상이면 raw_title(str), 아니면 None.
+
+        우선순위: alt_tab > app_overlay > tab_editor > enable_all.
+        in_app_overlay(fg.wcn 기반)와 in_tab_editor(obj.wcn 기반)가 같은 이벤트에서
+        둘 다 True가 될 수 있어도 아래 `if in_alt_tab or in_app_overlay: src = obj`로
+        overlay가 editor를 이긴다. 비프는 어느 쪽이든 1회이며 dedup 가드로 중복 억제.
+          1) Alt+Tab 오버레이 — obj.wcn이 Windows.UI.Input.InputSite.WindowClass.
+             obj 자신이 "선택 후보 창"의 name을 들고 있다.
+          2) 앱별 오버레이 (예: Notepad++ MRU) — fgWcn이 appId의 overlay
+             리스트에 등록된 상위창 wcn이면 overlay 모드. obj는 리스트 항목.
+          3) 에디터 자식 컨트롤 (예: 메모장 RichEditD2DPT) — obj.wcn이 appId의
+             editor 리스트에 있으면 editor 모드. foreground.name이 탭 제목.
+          4) enableAllWindows — 1~3 해당 없어도 전역 on일 때 foreground name.
+        """
+        in_alt_tab     = wcn == "Windows.UI.Input.InputSite.WindowClass"
+        in_app_overlay = tabClasses.is_overlay_class(appId, fg_wcn)
+        in_tab_editor  = tabClasses.is_editor_class(appId, wcn)
+        enable_all = settings.get("enableAllWindows")
+
+        if not (enable_all or in_alt_tab or in_app_overlay or in_tab_editor):
+            return None
+
+        # 매칭 소스 결정:
+        #   - alt_tab/overlay: obj.name이 탭 제목 (Alt+Tab 후보 창, MRU 리스트 항목)
+        #   - editor/enable_all: foreground.name이 활성 탭 제목. fg None이면 obj 폴백.
+        if in_alt_tab or in_app_overlay:
+            src = obj
+        else:
+            src = fg or obj
+
+        raw_title = (getattr(src, "name", "") or "").strip()
+        if not raw_title:
+            return None
+        return raw_title
+
     def event_gainFocus(self, obj, nextHandler):
         # 창 전환 시 파일 I/O 없음. 메모리 목록만 참조.
         # event_gainFocus는 모든 포커스 전환마다 호출되므로, 본 애드온 예외가
         # NVDA 이벤트 체인을 끊지 않도록 try/except + finally로 nextHandler() 보장.
         try:
-            # 진단 모드 (debugLogging=True 일 때만).
-            # Ctrl+Tab 등에서 비프가 안 나는 원인을 실측으로 특정하기 위한 일회성 기록.
-            # NVDA 로그에 한 줄/이벤트로 남는다. 진단 블록 내부 예외는 본 로직을
-            # 침범하지 않도록 독립 try/except로 격리.
             if settings.get("debugLogging"):
-                try:
-                    wcn = getattr(obj, "windowClassName", "") if obj is not None else ""
-                    obj_name = (getattr(obj, "name", "") or "") if obj is not None else ""
-                    role = getattr(obj, "role", "") if obj is not None else ""
-                    parent = getattr(obj, "parent", None) if obj is not None else None
-                    parent_wcn = getattr(parent, "windowClassName", "") if parent is not None else ""
-                    fg = api.getForegroundObject()
-                    fg_wcn = getattr(fg, "windowClassName", "") if fg is not None else ""
-                    fg_name = (getattr(fg, "name", "") or "") if fg is not None else ""
-                    try:
-                        obj_app = getAppId(obj) if obj is not None else ""
-                    except Exception:
-                        obj_app = "<err>"
-                    log.info(
-                        f"mtwn: DBG gF wcn={wcn!r} name={obj_name!r} role={role!r} "
-                        f"parentWcn={parent_wcn!r} fgWcn={fg_wcn!r} fgName={fg_name!r} "
-                        f"appId={obj_app!r}"
-                    )
-                except Exception:
-                    log.exception("mtwn: debug log failed")
+                self._log_focus_diag(obj)
 
             if obj is None:
                 return
@@ -535,36 +576,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
             fg = api.getForegroundObject()
             fg_wcn = getattr(fg, "windowClassName", "") if fg is not None else ""
 
-            # 매칭 분기 (Phase B). 우선순위: alt_tab > app_overlay > tab_editor > enable_all.
-            # in_app_overlay(fg.wcn 기반)와 in_tab_editor(obj.wcn 기반)가 같은 이벤트에서
-            # 둘 다 True가 될 수 있어도 아래 `if in_alt_tab or in_app_overlay: src = obj`로
-            # overlay가 editor를 이긴다. 비프는 어느 쪽이든 1회이며 dedup 가드로 중복 억제.
-            #   1) Alt+Tab 오버레이 — obj.wcn이 Windows.UI.Input.InputSite.WindowClass.
-            #      obj 자신이 "선택 후보 창"의 name을 들고 있다.
-            #   2) 앱별 오버레이 (예: Notepad++ MRU) — fgWcn이 appId의 overlay
-            #      리스트에 등록된 상위창 wcn이면 overlay 모드. obj는 리스트 항목.
-            #   3) 에디터 자식 컨트롤 (예: 메모장 RichEditD2DPT) — obj.wcn이 appId의
-            #      editor 리스트에 있으면 editor 모드. foreground.name이 탭 제목.
-            #   4) enableAllWindows — 1~3 해당 없어도 전역 on일 때 foreground name.
-            in_alt_tab     = wcn == "Windows.UI.Input.InputSite.WindowClass"
-            in_app_overlay = tabClasses.is_overlay_class(appId, fg_wcn)
-            in_tab_editor  = tabClasses.is_editor_class(appId, wcn)
-            enable_all = settings.get("enableAllWindows")
-
-            if not (enable_all or in_alt_tab or in_app_overlay or in_tab_editor):
-                return
-
-            # 매칭 소스 결정:
-            #   - alt_tab/overlay: obj 자신의 name이 탭 제목 (Alt+Tab 오버레이의
-            #     각 후보 창, Notepad++ MRU의 각 리스트 항목)
-            #   - editor/enable_all: foreground.name이 현재 활성 탭 제목. fg가
-            #     None이면 obj로 폴백.
-            if in_alt_tab or in_app_overlay:
-                src = obj
-            else:
-                src = fg or obj
-
-            raw_title = (getattr(src, "name", "") or "").strip()
+            raw_title = self._determine_match_source(obj, wcn, appId, fg, fg_wcn)
             if not raw_title:
                 return
             # title 정규화: 꼬리 " - 앱명" 한 덩이 제거로 Alt+Tab obj.name,
