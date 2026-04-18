@@ -1,334 +1,134 @@
-# multiTaskingWindowNotifier 개선 포인트
+# multiTaskingWindowNotifier 진화 이력 + 로드맵
 
-NVDA API 레퍼런스를 기반으로 분석한 개선 사항입니다.
-
-## 📌 1. 우선순위: 높음 (기능성 & 안정성)
-
-### 1.1 설정 시스템 추가 (config 모듈 활용)
-**현재**: 비프음 설정이 하드코딩됨 (130Hz~4978Hz, 100ms, 좌우 30)
-**개선**:
-```python
-import config
-
-# config/__init__.py에 설정 스키마 정의
-confspec = {
-    "beepDuration": "integer(default=100, min=50, max=500)",
-    "beepVolumeLeft": "integer(default=30, min=0, max=100)",
-    "beepVolumeRight": "integer(default=30, min=0, max=100)",
-    "maxItems": "integer(default=64, min=1, max=100)",
-}
-config.conf.spec["multiTaskingWindowNotifier"] = confspec
-
-# 사용
-duration = config.conf["multiTaskingWindowNotifier"]["beepDuration"]
-tones.beep(BEEP_TABLE[idx], duration, left, right)
-```
-**참조**: `레퍼런스 5.1 config (설정)` - 설정 읽기/쓰기, 저장
+이 파일은 "할 일 나열"이 아니라 "프로젝트 진화 연대기 + 현재 로드맵"이다.
+구성: 완료 이력 → Non-goals(명시적 보류) → 현재 로드맵 → 참조.
+신규 기여자는 "현재 로드맵" 섹션부터 읽으면 된다.
 
 ---
 
-### 1.2 GUI 설정 패널 추가 (guiHelper 활용)
-**현재**: 설정 변경이 불가능 (파일 수정만 가능)
-**개선**: NVDA 설정에 전용 패널 추가
-```python
-from gui import settingsDialogs, guiHelper
-import wx
+## 프로젝트 목적
 
-class MultiTaskingSettingsPanel(settingsDialogs.SettingsPanel):
-    title = "창 전환 알림"
-
-    def makeSettings(self, settingsSizer):
-        sHelper = guiHelper.BoxSizerHelper(self, sizer=settingsSizer)
-
-        # 비프음 길이 조정
-        self.durationSpin = sHelper.addLabeledControl(
-            "비프음 길이 (ms):",
-            wx.SpinCtrl,
-            min=50, max=500,
-            initial=config.conf["multiTaskingWindowNotifier"]["beepDuration"]
-        )
-
-        # 최대 항목 수
-        self.maxItemsSpin = sHelper.addLabeledControl(
-            "최대 항목:",
-            wx.SpinCtrl,
-            min=1, max=100,
-            initial=config.conf["multiTaskingWindowNotifier"]["maxItems"]
-        )
-
-    def onSave(self):
-        config.conf["multiTaskingWindowNotifier"]["beepDuration"] = \
-            self.durationSpin.GetValue()
-        config.conf["multiTaskingWindowNotifier"]["maxItems"] = \
-            self.maxItemsSpin.GetValue()
-```
-**참조**: `레퍼런스 2.1~2.2 guiHelper, settingsDialogs`
+NVDA 스크린 리더 애드온. Alt+Tab/Ctrl+Tab 창 전환 시 등록된 창마다 다른 비프음을 재생해 창을 청각적으로 구분하고 전환 속도를 높인다. 앱 단위(a 단음)와 창/탭 단위(a→b 2음) 2계층 등록을 지원한다. 구조·데이터 포맷·단축키 상세는 `CLAUDE.md` 참조.
 
 ---
 
-### 1.3 로깅 추가 (logging 모듈)
-**현재**: 디버깅이 어려움 (에러 발생 시 추적 불가)
-**개선**:
-```python
-import logging
-log = logging.getLogger(__name__)
+## 완료 이력
 
-# AppListStore.load
-try:
-    with open(path, "r", encoding="utf-8") as f:
-        items = [line.strip() for line in f if line.strip()]
-    log.info(f"앱 목록 로드 완료: {len(items)}개")
-except FileNotFoundError:
-    log.warning(f"app.list 파일이 없습니다: {path}")
-    items = []
-except Exception as e:
-    log.error(f"앱 목록 로드 실패: {e}", exc_info=True)
-    ui.message(f"앱 목록을 여는 중 문제가 생겼어요: {e}")
-    items = []
-```
-**참조**: `레퍼런스 12.1 디버깅 팁 - NVDA 로그 확인`
+### Phase A (v1~v3): 기본 골격
 
----
+- 설정 시스템: `settings.py` confspec 6키 — beepDuration / beepGapMs / beepVolumeLeft / beepVolumeRight / maxItems / debugLogging. `config.conf`로 NVDA 설정 패널에서 조정 가능.
+- GUI 설정 패널: `settingsPanel.py` SettingsPanel 구현. NVDA 설정 대화상자 "창 전환 알림" 패널.
+- 로깅: 전역 log 호출 65개. 마이그레이션/매칭/폴백 흐름 추적 가능.
+- 대표 커밋: `5482180` — "설정/저장소/GUI 패널을 GlobalPlugin에 통합 (Phase 1~3)"
 
-### 1.4 windowClassName 조건 제거 또는 설정화 (종료)
-**상태**: Phase B의 `_determine_match_source` 3분기(Alt+Tab 오버레이 /
-앱별 overlay / 에디터 자식 컨트롤) 커버로 대체됨.
-**경과**:
-- 초기: `"Windows.UI.Input.InputSite.WindowClass"`에서만 동작 (본 이슈 원안).
-- 중간: "옵션 2" 초안이 `enableAllWindows` 설정으로 실제 도입되어 catchall 분기 역할 수행.
-- 최종(2026-04): Phase B 3분기가 주요 시나리오를 모두 커버 → `enableAllWindows`는 의도
-  불명확 + 오작동 위험(대화상자/서브윈도우 제목이 등록 창 제목과 우연 일치 시 오비프)
-  이유로 제거. 미커버 앱은 NVDA+Shift+T로 editor wcn을 학습시키는 게 정규 경로.
+### Phase B (v4~v6): 2차원 비프 + 3분기 매칭
 
----
+- 앱/창 2계층 scope 도입: `SCOPE_APP`(appId 단독키, a 단음) / `SCOPE_WINDOW`(appId|title 복합키, a→b 2음). 매칭 우선순위 창>앱. 대표 커밋: `263b965`.
+- 비프 2음 구조: `beepPlayer.play_beep(app_idx, tab_idx, scope)`. core.callLater 기반 gap 예약. 대표 커밋: `f290cbb`.
+- `event_gainFocus` 3분기: (1) Alt+Tab 오버레이 wcn 고정 / (2) 앱별 overlay wcn / (3) editor 자식 컨트롤 wcn. 모든 title은 `normalize_title` 통과.
+- 음성 우선순위: `speech.Spri` 적용. 즉시 알림은 `Spri.NOW`, 일반은 `Spri.NEXT`. 대표 커밋: `51cef3d`.
+- `enableAllWindows` 설정 제거: 3분기가 주요 시나리오를 모두 커버. 미커버 앱은 NVDA+Shift+T로 editor wcn 학습이 정규 경로.
+- 단축키 `@script` + `category` 한글("창 전환 알림")로 통일.
+- `listDialog.py` guiHelper 부분 적용 — 대표 커밋: `f94c098`.
 
-## 📌 2. 우선순위: 중간 (사용성 개선)
+### Phase B' (v7): C major 온음계 전환
 
-### 2.1 브라우저블 메시지로 목록 표시 (ui.browseableMessage)
-**현재**: wxPython 다이얼로그 사용
-**개선**: HTML 형식의 브라우저블 메시지 활용
-```python
-@script(description="등록된 창 목록 보기", gesture="kb:NVDA+shift+i")
-def script_showAllEntries(self, gesture=None):
-    if not self.appList:
-        ui.message("등록된 창이 없어요.")
-        return
+반음 64음 테이블(v6)을 C major 온음계 35음(C3 130Hz~B7 3951Hz)으로 교체했다. 배경은 사용자 피드백: "반음 간격은 인접 슬롯 변별이 약하다". 온음계로 바꾸면 1번(도)과 2번(레)이 전음 간격으로 분리돼 청각 구분이 명확해진다.
 
-    # HTML 생성
-    html_lines = ["<h1>등록된 창 목록</h1>", f"<p>총 {len(self.appList)}개</p>", "<ul>"]
-    for entry in sorted(self.appList):
-        appId, title = _splitKey(entry)
-        html_lines.append(f"<li><b>{appId or '앱 미지정'}</b> | {title}</li>")
-    html_lines.append("</ul>")
+인덱스 의미 자체가 달라지므로 로드 시 기존 appBeepMap/tabBeepIdx를 전부 버리고 순차 재배정한다. 1회성 자동 마이그레이션. 사용자는 주파수 재학습 필요.
 
-    html = "\n".join(html_lines)
-    ui.browseableMessage(html, title="등록된 창 목록", isHtml=True)
-```
-**장점**:
-- 스크린 리더 친화적 (브라우즈 모드 사용 가능)
-- wxPython GUI 대비 간단
-- 복사/검색 가능
-**참조**: `레퍼런스 1.4 UI - browseableMessage`
+`event_nameChange` 기반 탭 전환 감지도 이 단계에서 도입됐다. 대표 커밋: `ae2e862`.
+
+### 대체 완료
+
+- **browseableMessage 목록 표시** (구 2.1): `listDialog.py` wx.Dialog로 대체. 다중 선택 + Delete 키 + 앱 일괄 삭제 확인까지 지원해 browseableMessage(읽기 전용 HTML)보다 기능적으로 우위. 재판정 대상 아님.
+- **비프음 테이블 커스터마이징** (구 3.2): v7 C major 온음계 고정 채택 (커밋 `ae2e862`). "변별력 우선" 결정이라 사용자 정의 등비수열은 역효과. 재판정 대상 아님.
+- **windowClassName 고정 조건** (구 1.4): Phase B 3분기로 대체. `enableAllWindows` 제거. 종료.
+- **단축키 카테고리 한글 통일** (구 2.3): Phase B에서 완료.
+- **guiHelper 다이얼로그 개선** (구 2.4): `listDialog.py`에 guiHelper 적용 완료 (커밋 `f94c098`).
 
 ---
 
-### 2.2 음성 우선순위 지정 (speech.Spri)
-**현재**: ui.message의 기본 우선순위 사용
-**개선**:
-```python
-from speech import Spri
+## Non-goals (명시적 보류)
 
-# 즉시 알려야 하는 경우
-ui.message("이미 목록에 있어요.", speechPriority=Spri.NOW)
+아래 항목은 "아직 안 한 것"이 아니라 "하지 않기로 결정한 것"이다. 재검토 트리거가 충족되지 않는 한 구현 시도 금지.
 
-# 일반적인 경우
-ui.message("추가했어요", speechPriority=Spri.NEXT)
-```
-**참조**: `레퍼런스 1.3 Speech - 우선순위`
+### #3 창 그룹/프로필
 
----
+업무/개발/개인 프로필별 app.json 분리. 사용자 보류 결정 (`__init__.py:6` 메모 참조). 단일 저장소 철학과 충돌하고 마이그레이션 복잡도가 크다.
 
-### 2.3 단축키 충돌 가능성 체크
-**현재**: NVDA+Shift+T/D/R/I 사용
-**문제**: 다른 애드온과 충돌 가능
-**개선**:
-- 카테고리를 한글로 통일: `"창 전환 알림"`
-- 제스처를 사용자가 변경 가능하도록 주석 추가
-```python
-@script(
-    description="현재 창 추가",
-    category="창 전환 알림",
-    gesture="kb:NVDA+shift+t"  # 사용자 정의 가능
-)
-```
-**참조**: `레퍼런스 3.2 scriptHandler - 스크립트 데코레이터`
+재검토 트리거: 사용자가 명시적으로 다시 꺼낼 때만.
+
+### #9 통계 기능
+
+일/주간 전환 집계 UI. 사용자 보류 결정 (`__init__.py:7` 메모 참조). `switchCount` 메타 수집은 유지하되 집계 UI는 만들지 않는다.
+
+재검토 트리거: 사용자 요청.
+
+### 3.3 requestEvents 최적화
+
+`event_gainFocus` 수신을 특정 wcn으로 제한하는 방식. 현재 지연 실측 수치가 없다. requestEvents는 "수신 확장" API라 현 3분기 매칭을 제한하는 순간 다른 분기가 깨진다.
+
+재검토 트리거: Phase 4 성능 측정에서 event_gainFocus 처리 평균 >= 5ms 확인 시.
 
 ---
 
-### 2.4 다이얼로그 개선 (guiHelper 활용)
-**현재**: 수동으로 wxPython 레이아웃 구성
-**개선**:
-```python
-from gui import guiHelper
+## 현재 로드맵
 
-class AppListDialog(wx.Dialog):
-    def _create_ui(self):
-        mainSizer = wx.BoxSizer(wx.VERTICAL)
-        sHelper = guiHelper.BoxSizerHelper(self, wx.VERTICAL)
+### Phase 1 — appModuleHandler 전환
 
-        # 자동 간격 처리
-        countLabel = wx.StaticText(self, label=f"총 {len(self.appList)}개")
-        sHelper.addItem(countLabel)
+`appIdentity.py`의 `obj.appModule` 직접 getattr를 NVDA 공식 API `appModuleHandler.getAppModuleForNVDAObject(obj)`로 교체한다. `obj.appModule`은 private 접근이라 NVDA 내부 변경에 취약하다.
 
-        self.listBox = sHelper.addLabeledControl(
-            "등록된 창:",
-            wx.ListBox,
-            choices=display_items,
-            style=wx.LB_SINGLE | wx.LB_HSCROLL,
-            size=(500, 300)
-        )
+완료 기준:
+- `obj.appModule` 직접 접근 0건
+- 테스트 Green
+- 기존 `app.json` appId 키 변화 없음
 
-        # 버튼 그룹
-        bHelper = guiHelper.ButtonHelper(wx.HORIZONTAL)
-        okBtn = bHelper.addButton(self, id=wx.ID_OK, label="확인")
-        okBtn.SetDefault()
-        sHelper.addItem(bHelper)
+참조: `globalPlugins/multiTaskingWindowNotifier/appIdentity.py:9-19`
 
-        mainSizer.Add(
-            sHelper.sizer,
-            border=guiHelper.BORDER_FOR_DIALOGS,
-            flag=wx.ALL
-        )
-        self.SetSizer(mainSizer)
-        mainSizer.Fit(self)
-```
-**참조**: `레퍼런스 2.1 guiHelper - BoxSizerHelper`
+### Phase 2 — `__init__.py` 분해 (633줄 → 180줄)
 
----
+현재 `__init__.py`가 설정 등록 / 이벤트 훅 / 스크립트 / 매칭 / 플러시 / 다이얼로그 6가지 책임을 혼재한다. 신규 모듈 6개로 분리:
 
-## 📌 3. 우선순위: 낮음 (최적화 & 고급 기능)
+- `focusDispatcher.py` — event_gainFocus 진입점, 3분기 라우팅
+- `matcher.py` — appListStore 조회, 매칭 로직
+- `lookupIndex.py` — 메모리 캐시 인덱스 (dedup 가드 포함)
+- `nameChangeWatcher.py` — event_nameChange 기반 탭 전환 감지
+- `scripts.py` — @script 핸들러 4개
+- `switchFlusher.py` — 디바운스 flush 타이머
 
-### 3.1 appModuleHandler 활용
-**현재**: `obj.appModule.appName`으로 직접 접근
-**개선**: appModuleHandler 사용
-```python
-import appModuleHandler
+완료 기준: `__init__.py` <= 180줄, 각 모듈 <= 150줄, 순환 import 없음, 모든 단축키 회귀 없음.
 
-def _getAppId(obj) -> str:
-    try:
-        appModule = appModuleHandler.getAppModuleForNVDAObject(obj)
-        appId = appModule.appName if appModule else ""
-    except Exception:
-        appId = ""
+### Phase 3 — `appListStore.py` 분해 (806줄 → 400줄)
 
-    if not appId:
-        appId = getattr(obj, "windowClassName", "") or "unknown"
-    return appId
-```
-**참조**: `레퍼런스 8.1 appModuleHandler`
+`store/` 서브패키지 도입. v8 마이그레이션 추가 시 `migrations/v7_to_v8.py` 1파일만 신설하면 되는 구조.
+
+서브 모듈:
+- `store/core.py` — 공개 API (load/save/record_switch/flush 등)
+- `store/io.py` — 파일 I/O, 원자적 저장
+- `store/assign.py` — 비프 인덱스 할당 알고리즘
+- `store/migrations/` — 버전별 마이그레이션 함수
+
+완료 기준: `appListStore.py` 제거, v2→v7 / v3→v7 / v6→v7 golden fixture 3경로 byte-for-byte 동일.
+
+### Phase 4 — 테스트 보강
+
+현재 커버리지 공백: `listDialog.py` 0%, `event_nameChange` 시나리오 없음, 성능 수치 없음.
+
+신규 테스트 파일:
+- `test_list_dialog.py` — 다중 선택, Delete 키, 앱 일괄 삭제 확인 흐름
+- `test_name_change.py` — event_nameChange 탭 전환 시나리오
+- `test_perf_focus.py` — event_gainFocus 처리 시간 측정 (Non-goals 3.3 트리거 데이터)
+- `test_phase1_appmodule.py`, `test_phase2_dispatch.py`, `test_phase3_store.py`, `test_phase4_integration.py` — 각 Phase 회귀 테스트
+
+완료 기준: 커버리지 85%+. 성능 수치는 Non-goals 3.3 requestEvents 재검토 트리거로 사용.
 
 ---
 
-### 3.2 비프음 테이블 커스터마이징 (tones 모듈)
-**현재**: 64개 고정 주파수
-**개선**: 사용자 정의 범위
-```python
-def generate_beep_table(start_hz, end_hz, count):
-    """등비수열로 비프음 테이블 생성"""
-    ratio = (end_hz / start_hz) ** (1 / (count - 1))
-    return [int(start_hz * (ratio ** i)) for i in range(count)]
+## 참조
 
-# 설정에서 읽기
-start_hz = config.conf["multiTaskingWindowNotifier"]["beepStartHz"]
-end_hz = config.conf["multiTaskingWindowNotifier"]["beepEndHz"]
-BEEP_TABLE = generate_beep_table(start_hz, end_hz, MAX_ITEMS)
-```
-**참조**: `레퍼런스 6.3 tones`
-
----
-
-### 3.3 이벤트 필터링 최적화
-**현재**: 모든 gainFocus 이벤트를 처리
-**개선**: requestEvents 또는 shouldAcceptEvent 활용 (고급)
-```python
-# globalPlugin __init__에서
-import eventHandler
-
-# 특정 프로세스의 이벤트만 수신 (선택적)
-eventHandler.requestEvents(
-    "gainFocus",
-    processId=None,  # 모든 프로세스
-    windowClassName="Windows.UI.Input.InputSite.WindowClass"
-)
-```
-**참조**: `레퍼런스 4.1 eventHandler - requestEvents`
-
----
-
-### 3.4 창 전환 통계 기능 (보류 아이디어 #9 구현)
-```python
-import json
-from datetime import datetime
-
-class WindowStats:
-    def __init__(self, stats_file):
-        self.stats_file = stats_file
-        self.stats = self.load()
-
-    def load(self):
-        try:
-            with open(self.stats_file, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except:
-            return {"daily": {}, "weekly": {}}
-
-    def record_switch(self, key):
-        today = datetime.now().strftime("%Y-%m-%d")
-        if today not in self.stats["daily"]:
-            self.stats["daily"][today] = {}
-        self.stats["daily"][today][key] = \
-            self.stats["daily"][today].get(key, 0) + 1
-
-    def get_top_windows(self, n=5):
-        today = datetime.now().strftime("%Y-%m-%d")
-        if today not in self.stats["daily"]:
-            return []
-        items = sorted(
-            self.stats["daily"][today].items(),
-            key=lambda x: x[1],
-            reverse=True
-        )
-        return items[:n]
-
-# GlobalPlugin에서 사용
-def __init__(self):
-    super().__init__()
-    # ...
-    stats_file = os.path.join(self.appDir, "stats.json")
-    self.stats = WindowStats(stats_file)
-
-def event_gainFocus(self, obj, nextHandler):
-    # ...
-    if idx is not None:
-        self.stats.record_switch(key)
-    nextHandler()
-```
-
----
-
-## 📌 4. 권장 개선 순서
-
-1. **1.4 windowClassName 조건 제거** (즉시 효과)
-2. **1.1 설정 시스템 추가** (확장성)
-3. **1.3 로깅 추가** (디버깅)
-4. **1.2 GUI 설정 패널** (사용성)
-5. **2.1 브라우저블 메시지** (접근성)
-6. **2.4 다이얼로그 개선** (코드 품질)
-7. 나머지는 필요에 따라
-
----
-
-## 📌 5. 참조 문서
-
-- **공식 개발자 가이드**: https://www.nvaccess.org/files/nvda/documentation/developerGuide.html
-- **현재 프로젝트 문서**: `CLAUDE.md`
+- `CLAUDE.md` — 프로젝트 구조, 데이터 포맷, 리뷰 플로우의 SoT
+- `AddonDevGuide.md` — NVDA API 공식 가이드
+- `AddonBestPractices.md` — 실전 애드온 패턴
+- 공식 개발자 가이드: https://download.nvaccess.org/documentation/developerGuide.html
+- 상세 실행 계획: `C:\Users\advck\.claude\plans\reactive-snuggling-blum.md`

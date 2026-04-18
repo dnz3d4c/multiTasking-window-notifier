@@ -19,9 +19,13 @@
 3. 리뷰 통과 시 **반드시 `uv run python build.py` 실행** — 사용자가 재빌드를 따로 요청하지 않아도 자동 수행.
    - 빌드 실패 시 원인 수정 후 재실행. 성공 표기(`OK: multiTaskingWindowNotifier-*.nvda-addon`) 확인 필수.
    - 과거 "리뷰는 통과했는데 재빌드를 빠뜨려 사용자가 구버전 애드온으로 테스트"한 이력 있음. 빌드는 리뷰와 동급의 필수 절차.
-4. 빌드 성공 후 `.claude/last-review.txt` 파일을 현재 시각으로 갱신 (Stop hook 마커)
+4. **Phase X.Y 커밋인 경우** IMPROVEMENTS.md 동기화
+   - 커밋 메시지가 `Phase 1.` / `Phase 2.` / `Phase 3.` / `Phase 4.` 프리픽스면 IMPROVEMENTS.md의 해당 항목을 "현재 로드맵" → "완료 이력"으로 이동
+   - Phase 전체가 끝난 시점에만 이동. 부분 커밋 중엔 건드리지 않음
+   - 새 Non-goal 결정이 코드 주석(`__init__.py:6-8` 류)으로 추가됐으면 IMPROVEMENTS.md Non-goals 섹션에도 동기화
+5. 빌드 성공 후 `.claude/last-review.txt` 파일을 현재 시각으로 갱신 (Stop hook 마커)
    - Windows bash: `date > .claude/last-review.txt`
-5. 기록 후에만 사용자에게 "완료" 응답. 응답에 생성된 `.nvda-addon` 파일명을 명시.
+6. 기록 후에만 사용자에게 "완료" 응답. 응답에 생성된 `.nvda-addon` 파일명을 명시.
 
 **리뷰 강도 판단 기준**
 - "NVDA API 오용 / `nextHandler()` 누락 / 예외 미처리 / 접근성 회귀" → 반드시 수정 후 재통과
@@ -140,39 +144,21 @@ NVDA 스크린 리더 추가 기능으로 Alt+Tab를 눌렀을 때 여러 창을
 
 ---
 
-### 프로젝트 개선 포인트
+### 프로젝트 진화 이력 + 현재 로드맵
 **파일**: [IMPROVEMENTS.md](IMPROVEMENTS.md)
-**내용**: NVDA API 레퍼런스 기반 현재 프로젝트 개선 사항
-- **우선순위 높음**: 설정 시스템, GUI 패널, 로깅, windowClassName 조건
-- **우선순위 중간**: 브라우저블 메시지, 음성 우선순위, 다이얼로그 개선
-- **우선순위 낮음**: appModuleHandler, 비프음 커스터마이징, 통계 기능
-- **권장 개선 순서 포함**
+**내용**: Phase A/B/B' 완료 이력 + 명시적 Non-goals + 현재 로드맵(Phase 1~4)
 
 **언제 사용**:
-- 기능 개선/추가 계획 시
-- 코드 리팩토링 시
-- 사용성/접근성 향상 시
+- "이거 이미 된 건가?"를 확인할 때 (완료 이력)
+- 보류 결정이 내려진 항목인지 확인할 때 (Non-goals)
+- 지금 할 일을 파악할 때 (현재 로드맵)
 ## 기본 사양
 - 언어: Python
-- 주요 파일:
-  - manifest.ini: 추가 기능의 역할, 기본 정보를 담은 파일
-  - globalPlugins\multiTaskingWindowNotifier\__init__.py: GlobalPlugin 및 스크립트/이벤트 훅
-  - globalPlugins\multiTaskingWindowNotifier\constants.py: ADDON_NAME, MAX_ITEMS, BEEP_TABLE 상수
-  - globalPlugins\multiTaskingWindowNotifier\appIdentity.py: 앱 ID/창 복합키 생성·파싱 + title 정규화(`normalize_title`, 꼬리 " - 앱명" 서픽스 제거)
-  - globalPlugins\multiTaskingWindowNotifier\appListStore.py: 앱 목록 + 메타데이터 JSON 저장소 (load/save/record_switch/flush/reload/get_meta/prune_stale, load 시 title normalize 자동 마이그레이션. reset_cache는 테스트 전용)
-  - globalPlugins\multiTaskingWindowNotifier\tabClasses.py: 앱별 탭 컨트롤 wcn 매핑(editor/overlay) + 자동 학습 저장소. event_gainFocus에서 고빈도 조회(캐시 set 기반)
-  - globalPlugins\multiTaskingWindowNotifier\windowInfo.py: 포커스 창 정보 추출 및 설정 디렉터리 헬퍼 (반환 title은 normalize 적용됨)
-  - globalPlugins\multiTaskingWindowNotifier\beepPlayer.py: v4 2차원 비프 재생 (`play_beep(app_idx, tab_idx, scope)` — scope=app은 a 단음, scope=window는 a→gap→b 2음. core.callLater 우선 + wx.CallLater 폴백)
-  - globalPlugins\multiTaskingWindowNotifier\listDialog.py: 등록 목록 wx.Dialog. 다중 선택 + Delete 키 + 앱 항목 일괄 삭제 확인 흐름 제공
-  - globalPlugins\multiTaskingWindowNotifier\settings.py: NVDA config 스키마 정의 및 register/get 헬퍼
-  - globalPlugins\multiTaskingWindowNotifier\settingsPanel.py: NVDA 설정 대화상자의 "창 전환 알림" 패널 (SettingsPanel 구현)
-  - globalPlugins\multiTaskingWindowNotifier\app.json: v7 — top-level `appBeepMap`(appId→BEEP_TABLE idx) + items[].tabBeepIdx(scope=window 전용). 등록된 앱·창 목록 + 메타(전환 카운트/마지막 사용 시각/등록일). v6 이하 로드 시 1회성 순차 재할당(v7은 온음계 테이블로 전환되며 인덱스 의미가 달라져 무조건 재배정). `app.list`가 있으면 최초 로드 시 자동 마이그레이션 후 `app.list.bak`으로 백업
-  - globalPlugins\multiTaskingWindowNotifier\tabClasses.json: 앱별 editor/overlay wcn 매핑. 파일 없으면 기본값(메모장/Notepad++)으로 자동 생성. 새 앱에서 NVDA+Shift+T 등록 시 editor wcn 자동 학습
+
 ## *중요* 모듈 문서화 원칙
-- **새 모듈 추가 시**: 위 "주요 파일" 목록에 파일명과 역할을 한 줄로 추가
-- **형식**: `파일명.py: 간결한 역할 설명 (1줄, 핵심 기능만)`
-- **예시**: `search_engine.py: 진행/시켜 검색 및 필터링 모듈`
-- **자동화**: 모듈 생성 완료 후 반드시 이 섹션 업데이트
+- **새 모듈 추가 시**: 아래 "프로젝트 구조" tree의 해당 위치에 파일명 + 인라인 주석(1줄 역할 설명) 추가
+- **형식**: tree 안에서 `파일명.py      # 간결한 역할 설명 (핵심 기능만)` 정렬
+- **자동화**: 모듈 생성 완료 후 반드시 tree 블록 업데이트
 
 ## 프로젝트 구조
 ```
