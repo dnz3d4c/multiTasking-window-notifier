@@ -15,9 +15,15 @@ from .appIdentity import getAppId, makeKey, normalize_title
 
 
 def config_addon_dir() -> str:
-    """사용자 설정 경로 하위의 애드온 디렉터리 경로 계산."""
+    """사용자 데이터 디렉터리 경로. %APPDATA%\\nvda\\multiTaskingWindowNotifier\\.
+
+    애드온 패키지 트리(%APPDATA%\\nvda\\addons\\...) 바깥에 저장해
+    재설치 시 app.json / tabClasses.json이 함께 지워지는 것을 방지한다.
+    portable NVDA에서는 globalVars.appArgs.configPath가 자동으로
+    portable 경로로 바뀐다.
+    """
     base = globalVars.appArgs.configPath
-    return os.path.join(base, "addons", ADDON_NAME, "globalPlugins", ADDON_NAME)
+    return os.path.join(base, ADDON_NAME)
 
 
 def get_current_window_info():

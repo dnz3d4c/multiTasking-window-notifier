@@ -58,6 +58,13 @@ class GlobalPlugin(ScriptsMixin, globalPluginHandler.GlobalPlugin):
             log.exception("mtwn: settings init failed")
 
         self.appDir = config_addon_dir()
+        # 첫 부팅 시점에 데이터 디렉토리를 선생성해 둔다. store/tabClasses의
+        # 저장 경로(_save_to_disk)가 각자 makedirs를 수행하긴 하지만, 사용자가
+        # 수동으로 경로를 열어보거나 로그에서 참조할 때 폴더가 즉시 보이도록.
+        try:
+            os.makedirs(self.appDir, exist_ok=True)
+        except Exception:
+            log.exception("mtwn: user data dir ensure failed: %s", self.appDir)
         self.appListFile = os.path.join(self.appDir, "app.list")
         # 초기 1회만 로드
         self.appList = store.load(self.appListFile)

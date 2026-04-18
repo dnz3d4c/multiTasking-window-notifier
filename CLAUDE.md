@@ -46,7 +46,7 @@
 1. `uv run python build.py` — `manifest.ini` + `globalPlugins/`를 묶어 `multiTaskingWindowNotifier-<version>.nvda-addon` 생성
 2. NVDA 메뉴 → 도구 → 애드온 스토어 → "외부 파일로부터 애드온 설치" → 생성된 `.nvda-addon` 선택
 3. NVDA 재시작
-4. (필요 시) 기존 사용자 데이터 이식: `tmp_merged_app.list` 류 병합 파일을 `%APPDATA%\nvda\addons\multiTaskingWindowNotifier\globalPlugins\multiTaskingWindowNotifier\app.list`에 복사 후 NVDA 재시작 (마이그레이션은 `store.core._load_state`가 알아서 함)
+4. (필요 시) 기존 사용자 데이터 이식: `tmp_merged_app.list` 류 병합 파일을 `%APPDATA%\nvda\multiTaskingWindowNotifier\app.list`에 복사 후 NVDA 재시작 (마이그레이션은 `store.core._load_state`가 알아서 함)
 
 ## 설치 구조 검증 체크리스트
 
@@ -57,15 +57,17 @@ NVDA 애드온 로드 오류가 의심되면 **코드보다 설치 트리를 먼
 | 1 | `manifest.ini` 존재 | `ls %APPDATA%\nvda\addons\multiTaskingWindowNotifier\manifest.ini` | 파일 있음 |
 | 2 | 플러그인 엔트리 포인트 | `ls %APPDATA%\nvda\addons\multiTaskingWindowNotifier\globalPlugins\multiTaskingWindowNotifier\__init__.py` | 파일 있음 |
 | 3 | 소스가 루트에 박혀있지 않은지 | `ls %APPDATA%\nvda\addons\multiTaskingWindowNotifier\*.py` | 결과 **없어야** 정상 |
-| 4 | 설정 섹션 생성 여부 | `grep multiTasking %APPDATA%\nvda\nvda.ini` | 섹션 헤더 보임 (애드온 최소 1회 실행 후) |
+| 4 | 사용자 데이터 위치 | `ls %APPDATA%\nvda\multiTaskingWindowNotifier\` | `app.json` / `tabClasses.json` 존재(애드온 실행 후). `addons\...\globalPlugins\` 내부에 이 파일들이 있으면 구 위치 — 삭제 대상 |
+| 5 | 설정 섹션 생성 여부 | `grep multiTasking %APPDATA%\nvda\nvda.ini` | 섹션 헤더 보임 (애드온 최소 1회 실행 후) |
 
 3번은 "수동 복사 오타 재발" 탐지용. 설치 경로에 `__init__.py`가 루트 레벨에 있으면 즉시 깨끗이 제거하고 `.nvda-addon`으로 재설치.
+4번은 Phase 5에서 사용자 데이터를 애드온 패키지 외부로 이전한 이후의 규약. 재설치 시 데이터가 유지되는 표준 위치.
 
 ## 빌드 스크립트 (`build.py`) 제외 규칙
 
 - `__pycache__`, `.pytest_cache`, `.venv`, `venv`, `.git`, `tests` 디렉토리는 패키지에 포함하지 않음
 - `.pyc/.pyo/.pyd` 컴파일 산출물 제외
-- `app.list`, `app.list.bak`, `app.json`, `app.json.tmp` 런타임 사용자 데이터 제외
+- `app.list`, `app.list.bak`, `app.json`, `app.json.tmp`, `tabClasses.json`, `tabClasses.json.tmp` 런타임 사용자 데이터 제외
 - 포함 대상은 오직 `manifest.ini` + `globalPlugins/` 트리
 
 # 기본
@@ -189,9 +191,19 @@ multiTaskingWindowNotifier/
         ├── matcher.py                     # 매칭 + 비프 재생 + 시그니처 dedup
         ├── lookupIndex.py                 # windowLookup / appLookup 재구성
         ├── switchFlusher.py               # 디바운스 flush 스케줄러
-        ├── scripts.py                     # ScriptsMixin (@script 4개 + 보조 헬퍼)
-        ├── app.json                       # 앱·창 목록 + 메타(switchCount 등). 구형 app.list는 로드 시 마이그레이션
-        └── tabClasses.json                # 앱별 editor/overlay wcn. 없으면 기본값으로 자동 생성
+        └── scripts.py                     # ScriptsMixin (@script 4개 + 보조 헬퍼)
+```
+
+### 런타임 사용자 데이터 (패키지 외부, 재설치 시 유지)
+
+`%APPDATA%\nvda\multiTaskingWindowNotifier\` 하위에 생성됨(`windowInfo.config_addon_dir()`가 반환). 배포 패키지에는 포함되지 않으며 사용자 실행 중 자동 생성/갱신.
+
+```
+%APPDATA%\nvda\multiTaskingWindowNotifier\
+├── app.json           # 앱·창 목록 + 메타(switchCount 등). 구형 app.list는 로드 시 마이그레이션
+├── tabClasses.json    # 앱별 editor/overlay wcn. 없으면 기본값으로 자동 생성
+├── app.list           # (구형, 있을 때만) 마이그레이션 대상
+└── app.list.bak       # (구형 마이그레이션 완료 후 보존본)
 ```
 
 ## 기술 스택 & 핵심 모듈
@@ -214,6 +226,9 @@ multiTaskingWindowNotifier/
   - `tabClasses` 모듈: 앱별 editor/overlay wcn 세트. `load()`가 DEFAULT와 합집합 병합, `is_*_class`는 캐시 set 조회(고빈도), `learn_editor`는 등록 성공 훅에서 best-effort 호출.
 
 ## 데이터 포맷
+
+**저장 위치**: `%APPDATA%\nvda\multiTaskingWindowNotifier\` (Phase 5에서 이전). 과거에는 애드온 패키지 디렉토리(`%APPDATA%\nvda\addons\multiTaskingWindowNotifier\globalPlugins\multiTaskingWindowNotifier\`) 내부에 저장했으나 재설치 시 트리 교체로 데이터가 소실되는 문제가 있어 외부로 분리. portable NVDA에서는 `globalVars.appArgs.configPath`가 자동으로 portable 경로로 전환된다.
+
 ### app.json (v7, 온음계 테이블로 전환)
 ```json
 {

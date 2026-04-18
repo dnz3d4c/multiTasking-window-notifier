@@ -28,7 +28,10 @@ EXCLUDE_DIR_NAMES = {"__pycache__", ".pytest_cache", ".venv", "venv", ".git", "t
 EXCLUDE_FILE_SUFFIXES = {".pyc", ".pyo", ".pyd"}
 # 런타임 사용자 데이터. 배포 패키지에 포함하면 설치 시 다른 사용자의 데이터가
 # 덮어씌워지거나 예상치 못한 마이그레이션이 일어난다.
-EXCLUDE_FILE_NAMES = {"app.list", "app.list.bak", "app.json", "app.json.tmp"}
+EXCLUDE_FILE_NAMES = {
+    "app.list", "app.list.bak", "app.json", "app.json.tmp",
+    "tabClasses.json", "tabClasses.json.tmp",
+}
 
 
 def read_version() -> str:
