@@ -114,6 +114,22 @@ class MultiTaskingSettingsPanel(SettingsPanel):
         )
         sHelper.addItem(enableAllHelp)
 
+        # Translators: 진단 로그 체크박스 라벨. 평상시엔 끄고, 문제 추적 시에만 사용.
+        self.debugLoggingCheck = sHelper.addItem(
+            wx.CheckBox(self, label=_("진단 로그 기록 (문제 추적용)"))
+        )
+        self.debugLoggingCheck.SetValue(bool(conf["debugLogging"]))
+
+        # Translators: 진단 로그 체크박스 아래의 보조 설명.
+        debugHelp = wx.StaticText(
+            self,
+            label=_(
+                "이 옵션을 켜면 포커스가 바뀔 때마다 창 정보가 NVDA 로그 파일에 기록됩니다. "
+                "Ctrl+Tab 등에서 비프가 나지 않는 원인을 추적할 때만 잠시 켜고, 평소에는 꺼 두세요."
+            ),
+        )
+        sHelper.addItem(debugHelp)
+
     def onSave(self):
         # SpinCtrl의 수동 입력 경로(Ctrl+A 후 타이핑 등)가 범위를 넘길 수 있어
         # 쓰기 시점에 명시적으로 clamp한다. configobj의 validate는 읽기 시점
@@ -129,6 +145,7 @@ class MultiTaskingSettingsPanel(SettingsPanel):
         conf["beepVolumeRight"] = volume_right
         conf["maxItems"] = max_items
         conf["enableAllWindows"] = self.enableAllCheck.IsChecked()
+        conf["debugLogging"] = self.debugLoggingCheck.IsChecked()
 
         # 시각 피드백 없는 스크린리더 사용자가 "왜 비프가 안 들리지?"에 빠지지 않도록
         # 양쪽 볼륨이 모두 0인 저장 순간에 명시 안내한다.

@@ -11,7 +11,7 @@ import globalVars
 from logHandler import log
 
 from .constants import ADDON_NAME
-from .appIdentity import getAppId, makeKey
+from .appIdentity import getAppId, makeKey, normalize_title
 
 
 def config_addon_dir() -> str:
@@ -37,10 +37,16 @@ def get_current_window_info():
     if fg is None:
         return None, None, None, None
     try:
-        title = (getattr(fg, "name", "") or "").strip()
+        raw_title = (getattr(fg, "name", "") or "").strip()
     except Exception:
         log.exception("mtwn: get_current_window_info read foreground name failed")
         return None, None, None, None
+    if not raw_title:
+        return None, None, None, None
+    # 등록/삭제 단일 진입점에서 title을 정규화해 event_gainFocus 매칭과 포맷을 맞춘다.
+    # "제목 없음 - 메모장" → "제목 없음". appId가 복합키의 1등 요소라 title에는
+    # 앱명 서픽스를 저장하지 않는다.
+    title = normalize_title(raw_title)
     if not title:
         return None, None, None, None
     appId = getAppId(fg)

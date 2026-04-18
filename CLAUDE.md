@@ -155,14 +155,16 @@ NVDA 스크린 리더 추가 기능으로 Alt+Tab를 눌렀을 때 여러 창을
   - manifest.ini: 추가 기능의 역할, 기본 정보를 담은 파일
   - globalPlugins\multiTaskingWindowNotifier\__init__.py: GlobalPlugin 및 스크립트/이벤트 훅
   - globalPlugins\multiTaskingWindowNotifier\constants.py: ADDON_NAME, MAX_ITEMS, BEEP_TABLE 상수
-  - globalPlugins\multiTaskingWindowNotifier\appIdentity.py: 앱 ID/창 복합키 생성·파싱 유틸
-  - globalPlugins\multiTaskingWindowNotifier\appListStore.py: 앱 목록 + 메타데이터 JSON 저장소 (load/save/record_switch/flush/reload/get_meta/prune_stale, reset_cache는 테스트 전용)
-  - globalPlugins\multiTaskingWindowNotifier\windowInfo.py: 포커스 창 정보 추출 및 설정 디렉터리 헬퍼
+  - globalPlugins\multiTaskingWindowNotifier\appIdentity.py: 앱 ID/창 복합키 생성·파싱 + title 정규화(`normalize_title`, 꼬리 " - 앱명" 서픽스 제거)
+  - globalPlugins\multiTaskingWindowNotifier\appListStore.py: 앱 목록 + 메타데이터 JSON 저장소 (load/save/record_switch/flush/reload/get_meta/prune_stale, load 시 title normalize 자동 마이그레이션. reset_cache는 테스트 전용)
+  - globalPlugins\multiTaskingWindowNotifier\tabClasses.py: 앱별 탭 컨트롤 wcn 매핑(editor/overlay) + 자동 학습 저장소. event_gainFocus에서 고빈도 조회(캐시 set 기반)
+  - globalPlugins\multiTaskingWindowNotifier\windowInfo.py: 포커스 창 정보 추출 및 설정 디렉터리 헬퍼 (반환 title은 normalize 적용됨)
   - globalPlugins\multiTaskingWindowNotifier\beepPlayer.py: scope/order 기반 단음 비프 재생 (`play_beep`, scope=app은 base 단음/scope=window는 base±반음 변주)
   - globalPlugins\multiTaskingWindowNotifier\listDialog.py: 등록 목록 wx.Dialog. 다중 선택 + Delete 키 + 앱 항목 일괄 삭제 확인 흐름 제공
   - globalPlugins\multiTaskingWindowNotifier\settings.py: NVDA config 스키마 정의 및 register/get 헬퍼
   - globalPlugins\multiTaskingWindowNotifier\settingsPanel.py: NVDA 설정 대화상자의 "창 전환 알림" 패널 (SettingsPanel 구현)
   - globalPlugins\multiTaskingWindowNotifier\app.json: 등록된 앱·창 목록 + 메타(전환 카운트/마지막 사용 시각/등록일). 하위호환으로 `app.list`가 있으면 최초 로드 시 자동 마이그레이션 후 `app.list.bak`으로 백업
+  - globalPlugins\multiTaskingWindowNotifier\tabClasses.json: 앱별 editor/overlay wcn 매핑. 파일 없으면 기본값(메모장/Notepad++)으로 자동 생성. 새 앱에서 NVDA+Shift+T 등록 시 editor wcn 자동 학습
 ## *중요* 모듈 문서화 원칙
 - **새 모듈 추가 시**: 위 "주요 파일" 목록에 파일명과 역할을 한 줄로 추가
 - **형식**: `파일명.py: 간결한 역할 설명 (1줄, 핵심 기능만)`
@@ -177,14 +179,16 @@ multiTaskingWindowNotifier/
     └── multiTaskingWindowNotifier/
         ├── __init__.py                    # GlobalPlugin + 스크립트/이벤트 훅
         ├── constants.py                   # ADDON_NAME, MAX_ITEMS, BEEP_TABLE
-        ├── appIdentity.py                 # 앱 식별/복합키 유틸
-        ├── appListStore.py                # 앱 목록 + 메타 JSON 저장소 (record_switch/flush 포함)
-        ├── windowInfo.py                  # 창 정보·경로 헬퍼
+        ├── appIdentity.py                 # 앱 식별/복합키 + normalize_title
+        ├── appListStore.py                # 앱 목록 + 메타 JSON 저장소 (load 시 title normalize 마이그레이션 포함)
+        ├── tabClasses.py                  # 앱별 editor/overlay wcn 매핑 + 자동 학습
+        ├── windowInfo.py                  # 창 정보·경로 헬퍼 (title normalize 적용)
         ├── beepPlayer.py                  # 비프음 재생 (wx.CallLater 기반 비동기)
         ├── listDialog.py                  # 목록 표시 wx.Dialog
         ├── settings.py                    # NVDA config 스키마 (confspec)
         ├── settingsPanel.py               # NVDA 설정 > 창 전환 알림 패널
-        └── app.json                       # 앱·창 목록 + 메타(switchCount 등). 구형 app.list는 로드 시 마이그레이션
+        ├── app.json                       # 앱·창 목록 + 메타(switchCount 등). 구형 app.list는 로드 시 마이그레이션
+        └── tabClasses.json                # 앱별 editor/overlay wcn. 없으면 기본값으로 자동 생성
 ```
 
 ## 기술 스택 & 핵심 모듈
@@ -196,15 +200,19 @@ multiTaskingWindowNotifier/
   - `scriptHandler.script`: 단축키 등록 데코레이터
   - `addonHandler`: 번역 초기화
 - **이벤트 후킹**
-  - `event_gainFocus` 단일 경로. 두 분기:
-    - obj.windowClassName == "Windows.UI.Input.InputSite.WindowClass" → Alt+Tab 오버레이. obj 자체에서 name/appId
-    - 그 외(`enableAllWindows=True`) → `api.getForegroundObject()`에서 name/appId. 메모장처럼 자식 컨트롤(RichEditD2DPT)이 focus를 받아도 활성 탭 제목 취득
-  - 같은 키 0.3초 내 재매칭은 `_MATCH_DEDUP_SEC` 가드로 한 번만
+  - `event_gainFocus` 단일 경로. 4분기(Phase B):
+    1. `obj.wcn == "Windows.UI.Input.InputSite.WindowClass"` → Alt+Tab 오버레이. `obj.name`이 탭 제목.
+    2. `tabClasses.is_overlay_class(appId, fgWcn)` → 앱별 오버레이(예: Notepad++ MRU `fgWcn='#32770'`). `obj.name`이 탭 제목.
+    3. `tabClasses.is_editor_class(appId, obj.wcn)` → 에디터 자식 컨트롤(예: 메모장 `RichEditD2DPT`, Notepad++ `Scintilla`). `foreground.name`이 탭 제목.
+    4. `enableAllWindows=True` → 모든 포커스 전환. `foreground.name`.
+  - 각 분기의 raw title은 `normalize_title`을 거쳐 꼬리 " - 앱명" 서픽스를 제거한 뒤 매칭. appId가 복합키 1등이라 title에 앱명 중복 저장하지 않는다.
+  - 같은 키 0.3초 내 재매칭은 `_MATCH_DEDUP_SEC` 가드로 한 번만.
 - **파일 저장소**
-  - `appListStore` 모듈: 앱 목록 + 메타 JSON I/O. 모듈 수준 캐시(`_states`)로 상태 유지, `record_switch`/`flush`로 디바운스 저장 지원.
+  - `appListStore` 모듈: 앱 목록 + 메타 JSON I/O. 모듈 수준 캐시(`_states`)로 상태 유지, `record_switch`/`flush`로 디바운스 저장. `_load_state`에서 title normalize 자동 마이그레이션 수행.
+  - `tabClasses` 모듈: 앱별 editor/overlay wcn 세트. `load()`가 DEFAULT와 합집합 병합, `is_*_class`는 캐시 set 조회(고빈도), `learn_editor`는 등록 성공 훅에서 best-effort 호출.
 
 ## 데이터 포맷
-### app.json (v3, Phase 3 이후 기본)
+### app.json (v3, Phase B 이후 title은 정규화된 형태)
 ```json
 {
   "version": 3,
@@ -213,8 +221,8 @@ multiTaskingWindowNotifier/
      "appId": "chrome", "title": "",
      "registeredAt": "2026-04-18T06:00:00",
      "switchCount": 0, "lastSeenAt": null},
-    {"key": "notepad|제목 없음 - 메모장", "scope": "window",
-     "appId": "notepad", "title": "제목 없음 - 메모장",
+    {"key": "notepad|제목 없음", "scope": "window",
+     "appId": "notepad", "title": "제목 없음",
      "registeredAt": "2026-04-17T20:00:00",
      "switchCount": 0, "lastSeenAt": null}
   ]
@@ -229,7 +237,24 @@ multiTaskingWindowNotifier/
 - **메타 필드**
   - `key` / `appId` / `title` — scope=app은 title이 빈 문자열
   - `registeredAt` / `switchCount` / `lastSeenAt` — 등록/사용 메타
+- **title 정규화** (Phase B): 등록 시점(`windowInfo.get_current_window_info`)과 로드 시점(`appListStore._load_state`) 모두 `normalize_title`을 거쳐 꼬리 " - 앱명" 한 덩이 제거. `"notepad|제목 없음 - 메모장"` 같은 구형 entry는 다음 로드 시 `"notepad|제목 없음"`으로 자동 변경되어 디스크에 영구화. v4 bump 없음.
 - **v2 → v3 자동 마이그레이션**: scope 필드가 없으면 모두 `"window"`로 보정. 다음 save 시 version=3로 디스크 승격.
+
+### tabClasses.json (v1, Phase B 신설)
+```json
+{
+  "version": 1,
+  "apps": {
+    "notepad":    {"editor": ["RichEditD2DPT"], "overlay": []},
+    "notepad++":  {"editor": ["Scintilla"],     "overlay": ["#32770"]}
+  }
+}
+```
+- **editor**: 탭 전환 확정 후 focus가 오는 자식 컨트롤 `windowClassName`. 이 wcn이 focus면 `foreground.name`을 탭 제목으로 매칭.
+- **overlay**: 탭 선택 오버레이 상위창의 `windowClassName` (즉 `api.getForegroundObject().windowClassName`). 이 fgWcn이면 `obj.name`을 탭 제목으로 매칭.
+- **기본값 병합**: 코드 내 `DEFAULT_TAB_CLASSES`와 합집합으로 병합. 사용자가 실수로 지워도 자동 복원.
+- **자동 학습**: `_do_add` 성공 후 `focus.wcn != fg.wcn`이면 해당 appId의 `editor`에 추가(best-effort).
+- **overlay 학습**: 이번 Phase 밖. 새 앱은 진단 로그로 fgWcn을 확인해 수동 편집.
 
 ### 하위호환: app.list
 - 구형 텍스트 포맷(한 줄당 `appId|title` 또는 `title`만).
@@ -243,9 +268,10 @@ multiTaskingWindowNotifier/
 
 ## 핵심 로직
 ### 앱 식별
-- `_getAppId(obj)`: `obj.appModule.appName` 또는 `windowClassName` 사용
-- `_makeKey(appId, title)`: `appId|title` 형식의 복합키 생성
-- `_splitKey(entry)`: 복합키 파싱, 구형 포맷 호환
+- `getAppId(obj)`: `obj.appModule.appName` 또는 `windowClassName` 사용
+- `makeKey(appId, title)`: `appId|title` 형식의 복합키 생성
+- `splitKey(entry)`: 복합키 파싱, 구형 포맷 호환
+- `normalize_title(name)`: 꼬리 " - 앱명" 한 덩이 제거. Alt+Tab obj.name, editor fg.name, MRU obj.name이 같은 형태로 떨어지게 함.
 
 ### 비프음 테이블 / 재생
 - `BEEP_TABLE`: 64개 주파수 (130Hz~4978Hz, 반음 단위)
@@ -332,9 +358,17 @@ multiTaskingWindowNotifier/
 - **방법**:
   - 등록 단위가 2계층 — "앱 전체"(SCOPE_APP)와 "특정 창/탭"(SCOPE_WINDOW). 매칭 우선순위 창>앱.
   - 비프 톤은 같은 appId 창들끼리 같은 base 주파수를 공유하고 등록 순서만큼 반음씩 위로 변주(`beepPlayer.play_beep`).
-  - 탭 전환은 `event_gainFocus` 단일 경로 + `api.getForegroundObject().name`으로 활성 탭 제목 취득. 메모장처럼 자식 컨트롤(RichEditD2DPT)에 focus가 와도 동작.
+  - 탭 전환은 `event_gainFocus` 단일 경로. Phase B에서 4분기(Alt+Tab 오버레이 / 앱별 오버레이 / 에디터 자식 컨트롤 / enableAllWindows)로 확장 + 모든 title은 `normalize_title` 통과.
 - **단축키 변화**:
-  - NVDA+Shift+T: 다이얼로그로 "이 창만/이 앱 전체" 선택
+  - NVDA+Shift+T: 다이얼로그로 "이 창만/이 앱 전체" 선택. scope=window 등록 성공 시 focus 자식 컨트롤의 wcn을 `tabClasses.json`의 editor에 자동 학습.
   - NVDA+Shift+D: 정확 매치(창 키 또는 앱 키)만 삭제 — 다른 앱의 동일 title 창 오삭제 방지
   - NVDA+Shift+I: 다중 선택 + Delete 키, 앱 항목 일괄 삭제 시 같은 appId 창 동반 삭제 확인
-- **데이터 포맷**: `app.json` v3, `scope` 필드. v2는 자동으로 모든 항목이 `scope=window`로 마이그레이션.
+- **데이터 포맷**: `app.json` v3 + `tabClasses.json` v1. app.json title은 Phase B에서 정규화된 형태로 저장(기존 데이터는 load 시 자동 마이그레이션).
+
+### 11. Ctrl+Tab 탭 전환 시 탭별 비프 🎹 (Phase B 구현 완료)
+- **목적**: Alt+Tab뿐 아니라 Ctrl+Tab으로 앱 내부 탭을 전환할 때도 등록된 탭마다 다른 비프.
+- **동작**:
+  - 메모장/Notepad++에서 Ctrl+Tab → 확정된 탭에서 editor 분기로 비프.
+  - Notepad++ MRU 오버레이 탐색 중에도 overlay 분기로 각 탭마다 비프.
+  - 한 번도 안 써본 앱은 NVDA+Shift+T로 에디터 영역에서 등록하면 editor wcn 자동 학습 → 이후 동작.
+- **전제**: title이 정규화된 형태(앱명 서픽스 없이)로 저장되어 있어야 Alt+Tab/editor/overlay 3경로가 같은 키로 매칭됨.

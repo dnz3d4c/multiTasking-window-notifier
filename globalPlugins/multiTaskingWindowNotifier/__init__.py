@@ -14,14 +14,16 @@ import api
 import ui
 import gui
 import speech
+import controlTypes
 import globalPluginHandler
 from logHandler import log
 from scriptHandler import script
 
 from .constants import ADDON_NAME, MAX_ITEMS, SCOPE_APP, SCOPE_WINDOW
-from .appIdentity import getAppId, makeKey, makeAppKey, splitKey
+from .appIdentity import getAppId, makeKey, makeAppKey, normalize_title, splitKey
 from . import appListStore
 from . import settings
+from . import tabClasses
 from .windowInfo import config_addon_dir, get_current_window_info
 from .beepPlayer import play_beep
 from .listDialog import AppListDialog
@@ -66,6 +68,14 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
         self.appListFile = os.path.join(self.appDir, "app.list")
         # 초기 1회만 로드
         self.appList = appListStore.load(self.appListFile)
+
+        # 앱별 탭 컨트롤 wcn 매핑 로드. 파일이 없으면 DEFAULT_TAB_CLASSES로 자동 생성된다.
+        # 로드 실패해도 애드온 기본 동작(Alt+Tab 매칭)은 유지되어야 하므로 예외는 삼킴.
+        self.tabClassesFile = os.path.join(self.appDir, "tabClasses.json")
+        try:
+            tabClasses.load(self.tabClassesFile)
+        except Exception:
+            log.exception("mtwn: tabClasses load failed — editor/overlay branches disabled")
         # scope=window 매칭용 사전: 복합키(appId|title)와 title-only 역매핑 모두 보유.
         # title-only 역매핑은 Alt+Tab 오버레이 케이스에서 obj의 appId가 explorer 등으로
         # 찍혀 신형 키 매칭이 깨질 때 fallback으로 쓰인다.
@@ -333,6 +343,41 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
             )
             return
         self._rebuild_lookup()
+
+        # editor classname 자동 학습: scope=window 등록이 성공했고, 실제 focus가
+        # foreground 최상위와 다른 자식 컨트롤(예: 메모장의 RichEditD2DPT)이라면
+        # 그 wcn을 tabClasses에 추가. 이후 Ctrl+Tab 전환 시 event_gainFocus가
+        # 바로 editor 분기를 탄다. scope=app은 탭 의미 없어 스킵.
+        # 학습 실패는 등록 자체를 막지 않음 — best-effort, 예외는 로그만.
+        #
+        # wx.CallAfter로 한 틱 미뤄 실행하는 이유: _do_add 자체가 SingleChoiceDialog
+        # 모달 종료 직후 동기 실행되어 focus가 아직 다이얼로그/mainFrame에 있을 수
+        # 있다. NVDA focus 이벤트가 큐 흘러간 뒤(=다음 wx 이벤트 루프 틱) `api.
+        # getFocusObject()`가 실제 대상 창의 자식 컨트롤을 가리킨다.
+        #
+        # 그래도 focus가 다이얼로그 내부에 남아 있는 경우가 있어(실측에서 wx
+        # SingleChoiceDialog의 ListBox가 반복 학습되는 버그 확인) role 게이트를
+        # 추가한다. 에디터 자식 컨트롤은 EDITABLETEXT(Scintilla) 또는
+        # DOCUMENT(RichEditD2DPT) 역할을 가지며, ListBox/Pane 같은 다이얼로그
+        # 위젯은 이 두 role에 속하지 않아 필터링된다.
+        if scope == SCOPE_WINDOW:
+            def _learn_editor_wcn():
+                try:
+                    focus = api.getFocusObject()
+                    fg_obj = api.getForegroundObject()
+                    if focus is None or fg_obj is None:
+                        return
+                    focus_wcn = getattr(focus, "windowClassName", "") or ""
+                    fg_wcn = getattr(fg_obj, "windowClassName", "") or ""
+                    focus_role = getattr(focus, "role", None)
+                    editor_roles = (controlTypes.Role.EDITABLETEXT, controlTypes.Role.DOCUMENT)
+                    if (focus_wcn and focus_wcn != fg_wcn
+                            and focus_role in editor_roles):
+                        tabClasses.learn_editor(appId, focus_wcn)
+                except Exception:
+                    log.exception("mtwn: tabClasses learn_editor hook failed")
+            wx.CallAfter(_learn_editor_wcn)
+
         if scope == SCOPE_APP:
             ui.message(f"앱 전체로 추가했어요: {appId}", speechPriority=speech.Spri.NEXT)
         else:
@@ -456,29 +501,79 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
         # event_gainFocus는 모든 포커스 전환마다 호출되므로, 본 애드온 예외가
         # NVDA 이벤트 체인을 끊지 않도록 try/except + finally로 nextHandler() 보장.
         try:
+            # 진단 모드 (debugLogging=True 일 때만).
+            # Ctrl+Tab 등에서 비프가 안 나는 원인을 실측으로 특정하기 위한 일회성 기록.
+            # NVDA 로그에 한 줄/이벤트로 남는다. 진단 블록 내부 예외는 본 로직을
+            # 침범하지 않도록 독립 try/except로 격리.
+            if settings.get("debugLogging"):
+                try:
+                    wcn = getattr(obj, "windowClassName", "") if obj is not None else ""
+                    obj_name = (getattr(obj, "name", "") or "") if obj is not None else ""
+                    role = getattr(obj, "role", "") if obj is not None else ""
+                    parent = getattr(obj, "parent", None) if obj is not None else None
+                    parent_wcn = getattr(parent, "windowClassName", "") if parent is not None else ""
+                    fg = api.getForegroundObject()
+                    fg_wcn = getattr(fg, "windowClassName", "") if fg is not None else ""
+                    fg_name = (getattr(fg, "name", "") or "") if fg is not None else ""
+                    try:
+                        obj_app = getAppId(obj) if obj is not None else ""
+                    except Exception:
+                        obj_app = "<err>"
+                    log.info(
+                        f"mtwn: DBG gF wcn={wcn!r} name={obj_name!r} role={role!r} "
+                        f"parentWcn={parent_wcn!r} fgWcn={fg_wcn!r} fgName={fg_name!r} "
+                        f"appId={obj_app!r}"
+                    )
+                except Exception:
+                    log.exception("mtwn: debug log failed")
+
             if obj is None:
                 return
 
-            in_alt_tab = getattr(obj, "windowClassName", "") == "Windows.UI.Input.InputSite.WindowClass"
+            wcn = getattr(obj, "windowClassName", "")
+            appId = getAppId(obj)
+            fg = api.getForegroundObject()
+            fg_wcn = getattr(fg, "windowClassName", "") if fg is not None else ""
+
+            # 매칭 분기 (Phase B). 우선순위: alt_tab > app_overlay > tab_editor > enable_all.
+            # in_app_overlay(fg.wcn 기반)와 in_tab_editor(obj.wcn 기반)가 같은 이벤트에서
+            # 둘 다 True가 될 수 있어도 아래 `if in_alt_tab or in_app_overlay: src = obj`로
+            # overlay가 editor를 이긴다. 비프는 어느 쪽이든 1회이며 dedup 가드로 중복 억제.
+            #   1) Alt+Tab 오버레이 — obj.wcn이 Windows.UI.Input.InputSite.WindowClass.
+            #      obj 자신이 "선택 후보 창"의 name을 들고 있다.
+            #   2) 앱별 오버레이 (예: Notepad++ MRU) — fgWcn이 appId의 overlay
+            #      리스트에 등록된 상위창 wcn이면 overlay 모드. obj는 리스트 항목.
+            #   3) 에디터 자식 컨트롤 (예: 메모장 RichEditD2DPT) — obj.wcn이 appId의
+            #      editor 리스트에 있으면 editor 모드. foreground.name이 탭 제목.
+            #   4) enableAllWindows — 1~3 해당 없어도 전역 on일 때 foreground name.
+            in_alt_tab     = wcn == "Windows.UI.Input.InputSite.WindowClass"
+            in_app_overlay = tabClasses.is_overlay_class(appId, fg_wcn)
+            in_tab_editor  = tabClasses.is_editor_class(appId, wcn)
             enable_all = settings.get("enableAllWindows")
-            if not (enable_all or in_alt_tab):
+
+            if not (enable_all or in_alt_tab or in_app_overlay or in_tab_editor):
                 return
 
-            # 매칭 소스 결정 (Phase 1 실측 결과 반영):
-            #   - Alt+Tab 오버레이(Windows.UI.Input.InputSite.WindowClass): obj 자신이
-            #     "선택 후보 창" 정보를 들고 있고, fg는 오버레이 자체라 부적합.
-            #   - 그 외(enableAllWindows=True): 메모장처럼 자식 컨트롤(RichEditD2DPT)이
-            #     focus를 받는 케이스가 있어 fg(=top-level foreground)에서 활성 탭
-            #     제목/appId를 얻어야 한다. fg가 None이면 obj로 폴백.
-            if in_alt_tab:
+            # 매칭 소스 결정:
+            #   - alt_tab/overlay: obj 자신의 name이 탭 제목 (Alt+Tab 오버레이의
+            #     각 후보 창, Notepad++ MRU의 각 리스트 항목)
+            #   - editor/enable_all: foreground.name이 현재 활성 탭 제목. fg가
+            #     None이면 obj로 폴백.
+            if in_alt_tab or in_app_overlay:
                 src = obj
             else:
-                src = api.getForegroundObject() or obj
+                src = fg or obj
 
-            title = (getattr(src, "name", "") or "").strip()
+            raw_title = (getattr(src, "name", "") or "").strip()
+            if not raw_title:
+                return
+            # title 정규화: 꼬리 " - 앱명" 한 덩이 제거로 Alt+Tab obj.name,
+            # editor fg.name, overlay obj.name을 같은 형태로 통일 → 등록 데이터와
+            # 정확 일치. appId는 scope=window 복합키의 1등 요소라 title에 앱명을
+            # 중복 저장하지 않는다.
+            title = normalize_title(raw_title)
             if not title:
                 return
-            appId = getAppId(src)
             self._match_and_beep(appId, title)
         except Exception:
             log.exception("mtwn: event_gainFocus failed")

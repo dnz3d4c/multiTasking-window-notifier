@@ -44,7 +44,7 @@ from datetime import datetime
 
 from logHandler import log
 
-from .appIdentity import splitKey
+from .appIdentity import makeKey, normalize_title, splitKey
 from .constants import MAX_ITEMS, SCOPE_APP, SCOPE_WINDOW
 
 # 본 모듈은 데이터 레이어다. 실패 시 `log`로만 보고하고 `ui.message`는 호출하지 않는다.
@@ -219,6 +219,56 @@ def _backup_legacy_list(list_path: str) -> None:
         log.warning("mtwn: app.list backup failed", exc_info=True)
 
 
+def _normalize_titles_in_place(state: dict) -> bool:
+    """state['items']의 SCOPE_WINDOW 각 항목 title에 `normalize_title` 적용.
+
+    "제목 없음 - 메모장" → "제목 없음" 같이 꼬리 앱명 서픽스를 벗겨내서
+    Alt+Tab/editor/overlay 세 경로가 공유하는 "순수 탭 제목" 포맷으로 통일한다.
+    title이 바뀌면 `key`(=`appId|title`)도 같이 재구성.
+
+    정규화 결과 기존 다른 항목과 key가 겹치면(예: "제목 없음 - 메모장"과
+    "제목 없음"을 둘 다 등록한 경우) **먼저 나온 항목을 유지**하고 뒤는 제거.
+
+    Returns: 뭐라도 변경됐으면 True. True면 state["dirty"]=True로 표시한다
+    (실제 디스크 쓰기는 호출부 책임).
+    """
+    items = state.get("items", [])
+    if not items:
+        return False
+
+    changed = False
+    seen_keys = set()
+    new_items = []
+    for it in items:
+        scope = it.get("scope", SCOPE_WINDOW)
+        if scope == SCOPE_WINDOW:
+            old_title = it.get("title", "")
+            new_title = normalize_title(old_title)
+            if new_title != old_title:
+                appId = it.get("appId", "")
+                new_key = makeKey(appId, new_title)
+                log.info(
+                    f"mtwn: migrate normalize_title "
+                    f"{old_title!r} → {new_title!r} key={it.get('key')!r} → {new_key!r}"
+                )
+                it = dict(it)
+                it["title"] = new_title
+                it["key"] = new_key
+                changed = True
+        key = it.get("key", "")
+        if key in seen_keys:
+            log.info(f"mtwn: migrate drop duplicate key={key!r}")
+            changed = True
+            continue
+        seen_keys.add(key)
+        new_items.append(it)
+
+    if changed:
+        state["items"] = new_items
+        state["dirty"] = True
+    return changed
+
+
 def _load_state(list_path: str) -> dict:
     """캐시를 우선 반환. 캐시 미스 시 JSON → app.list 마이그레이션 순으로 로드."""
     if list_path in _states:
@@ -253,6 +303,14 @@ def _load_state(list_path: str) -> dict:
                 state["dirty"] = False
                 _backup_legacy_list(list_path)
             # 저장 실패 시 dirty 유지 → 다음 flush에서 재시도
+
+    # title normalize 마이그레이션: "제목 없음 - 메모장" → "제목 없음".
+    # corrupted(state["items"]==[])는 변경이 없어 자연스럽게 통과. 정상 로드/legacy
+    # 마이그레이션 결과 모두에 적용된다. 변경이 있으면 디스크에 영구화.
+    if _normalize_titles_in_place(state):
+        if _save_to_disk(list_path, state):
+            state["dirty"] = False
+        # 저장 실패 시 dirty 유지 → 다음 flush/save에서 재시도
 
     _states[list_path] = state
     return state
