@@ -3,10 +3,10 @@
 
 """앱 목록 + 메타데이터 저장소.
 
-파일 포맷 (`app.json`, version=4):
+파일 포맷 (`app.json`, version=7):
     {
-      "version": 4,
-      "appBeepMap": {"chrome": 0, "notepad": 24, ...},
+      "version": 7,
+      "appBeepMap": {"chrome": 0, "notepad": 1, ...},
       "items": [
         {"key": "appId|title", "scope": "window",
          "appId": "...", "title": "...",
@@ -20,7 +20,21 @@
       ]
     }
 
-v4 변경점:
+v7 변경점 (v6 대비):
+    - `BEEP_TABLE`을 반음 64음에서 C major 온음계 35음(7음 × 5옥타브)으로 교체.
+      같은 appBeepMap/tabBeepIdx 구조지만 인덱스가 가리키는 주파수가 달라지고
+      상한도 64→35로 축소. 기존 v6 파일은 로드 시 기존 할당을 전부 폐기하고
+      순차 재할당된 뒤 version=7로 저장된다(1회성, 이후 반복 없음).
+
+v6 변경점 (v5 대비):
+    - 할당 알고리즘을 "거리 최대화"에서 "등록 순서 기반 순차"로 교체.
+      앱 A=0, 앱 B=1, 앱 C=2 ... 한 슬롯씩 상승. 탭도 appId별 독립 카운터로 0부터.
+      사용자 인지 모델("1번 다음은 2번") 유지 + 앱·탭 변별은 scope 분기된 재생
+      구조(a단음 vs a→gap→b 2음)로 담보.
+    - 삭제로 생긴 중간 gap은 재사용하지 않음 — max(used)+1 규칙으로 새 idx가
+      항상 증가해 등록 순서 추적 가능.
+
+구조 (v4부터 유지):
     - top-level `appBeepMap` — appId → BEEP_TABLE 인덱스. 같은 appId의 모든
       scope=window entry가 공유하는 "앱 비프"(a). scope=app entry가 없어도
       자동 할당되어 모든 appId가 항상 base 음을 가진다.
@@ -30,12 +44,13 @@ v4 변경점:
       주파수에 영향 없음.
 
 하위 호환:
-    - v3 (appBeepMap 없음, tabBeepIdx 없음): 로드 시 거리 기반 알고리즘으로
-      appBeepMap과 tabBeepIdx를 재할당. 기존 enumerate idx는 버린다. 사용자는
-      주파수 재학습 필요하나 변별력이 최대화됨.
-    - v2 (scope 필드 없음): v3 경유 자동 마이그레이션 후 v4로 승격.
-    - `app.json`이 없고 `app.list`가 있으면 최초 `load()`에서 JSON(v4)으로 마이그레이션.
-      모든 줄을 scope="window"로 등록 + 거리 기반 할당 후 `app.list.bak`으로 백업.
+    - v6 (반음 64음 테이블): 로드 시 기존 할당을 모두 버리고 v7 온음계 35음
+      테이블 기준으로 순차 재할당. 1회성, 사용자는 주파수 재학습 필요.
+    - v5 이하 (거리 최대화 할당): 같은 경로로 한 번에 v7까지 재배정.
+    - v3 이하 (appBeepMap/tabBeepIdx 필드 부재): 동일 재할당 경로로 커버.
+    - v2 (scope 필드 없음): v3→v7 경유 자동 마이그레이션.
+    - `app.json`이 없고 `app.list`가 있으면 최초 `load()`에서 JSON(v7)으로 마이그레이션.
+      모든 줄을 scope="window"로 등록 + 순차 할당 후 `app.list.bak`으로 백업.
     - 새 설치(둘 다 없음)는 빈 목록으로 시작.
 
 외부 API (기존 호출부 호환):
@@ -60,7 +75,14 @@ from datetime import datetime
 from logHandler import log
 
 from .appIdentity import makeKey, normalize_title, splitKey
-from .constants import BEEP_TABLE_SIZE, MAX_ITEMS, SCOPE_APP, SCOPE_WINDOW
+from .constants import (
+    BEEP_TABLE_SIZE,
+    BEEP_USABLE_SIZE,
+    BEEP_USABLE_START,
+    MAX_ITEMS,
+    SCOPE_APP,
+    SCOPE_WINDOW,
+)
 
 # 본 모듈은 데이터 레이어다. 실패 시 `log`로만 보고하고 `ui.message`는 호출하지 않는다.
 # 사용자 대면 알림은 상위 레이어(__init__.py의 script_* 등)에서 반환값으로 판단해 처리.
@@ -132,52 +154,64 @@ def _new_meta(key: str, scope: str = SCOPE_WINDOW, tabBeepIdx: int = None) -> di
     return meta
 
 
-def _assign_distant_idx(used, size: int = BEEP_TABLE_SIZE) -> int:
-    """거리 기반 인덱스 할당.
+def _assign_next_idx(used, size: int = BEEP_TABLE_SIZE, start: int = 0) -> int:
+    """순차 인덱스 할당. used의 [start, start+size) 구간 값의 max+1 반환.
 
-    `used`에 포함되지 않은 i in [0, size) 중 min_j|i - used_j|가 최대인 i 반환.
-    동률이면 가장 작은 i. used가 비면 0.
-
-    포화 상태(len(used) >= size)에서도 가장 먼 기존 idx와의 거리 최대값을 반환
-    (중복 허용). 호출부는 포화 로그를 자체적으로 남길 수 있다.
+    used에 구간 내 값이 없으면 start. 포화(max+1 >= start+size)면 구간 내 wrap
+    후 log.warning. 중간 idx가 삭제로 비어도 gap을 채우지 않고 항상 증가 —
+    "등록 순서대로 반음씩 위로"라는 사용자 인지 모델을 유지하기 위함이다.
 
     Args:
-        used: iterable of int. BEEP_TABLE idx 집합.
-        size: 팔레트 크기. 기본 BEEP_TABLE_SIZE.
+        used: BEEP_TABLE idx 집합. 구간 밖 값/비정수는 무시.
+        size: 할당 구간 크기 (기본 BEEP_TABLE_SIZE).
+        start: 할당 구간 시작 idx (기본 0). v5부터 BEEP_USABLE_START 전달.
 
     Returns:
-        int: 할당된 idx (0 ≤ result < size).
+        int: 할당된 idx (start ≤ result < start+size).
     """
-    used_list = [int(x) for x in used if isinstance(x, int) or str(x).lstrip("-").isdigit()]
-    if not used_list:
-        return 0
-    best_i = 0
-    best_dist = -1
-    for i in range(size):
-        dist = min(abs(i - u) for u in used_list)
-        if dist > best_dist:
-            best_dist = dist
-            best_i = i
-    return best_i
+    in_range = []
+    for x in used:
+        if isinstance(x, bool):
+            continue
+        if isinstance(x, int):
+            n = x
+        elif isinstance(x, str) and x.lstrip("-").isdigit():
+            n = int(x)
+        else:
+            continue
+        if start <= n < start + size:
+            in_range.append(n)
+    if not in_range:
+        return start
+    nxt = max(in_range) + 1
+    if nxt >= start + size:
+        nxt = start + ((nxt - start) % size)
+        log.warning(
+            f"mtwn: _assign_next_idx saturated, wrapping to {nxt} "
+            f"(start={start}, size={size})"
+        )
+    return nxt
 
 
 def _load_from_json(json_path: str):
     """Returns:
-        tuple(list, dict): 정상 로드 (items, appBeepMap). 파일 없거나 비어있으면 ([], {}).
+        tuple(list, dict, int): 정상 로드 (items, appBeepMap, version).
+            파일 없거나 비어있으면 ([], {}, 0).
         None: 파일은 있으나 파싱/구조 실패 (손상 신호).
 
-    None과 ([], {})를 구분하는 이유:
+    None과 ([], {}, 0)를 구분하는 이유:
         호출부(`_load_state`)가 "정상적으로 비어있음(=마이그레이션/백업 가능)"과
         "손상으로 인한 빈 상태(=구형 app.list는 건드리지 말고 보존)"를 구분해야 한다.
 
     appBeepMap은 v4부터 디스크에 저장된다. v3 이하는 빈 dict로 반환되고 호출부가
-    거리 기반 알고리즘으로 재할당한다.
+    거리 기반 알고리즘으로 재할당한다. version은 `_load_state`가 v4→v5
+    강제 재배정 판단에 사용한다.
     """
     try:
         with open(json_path, "r", encoding="utf-8") as f:
             data = json.load(f)
     except FileNotFoundError:
-        return ([], {})
+        return ([], {}, 0)
     except Exception:
         log.error(f"mtwn: app.json load failed (JSON parse) path={json_path}", exc_info=True)
         return None
@@ -185,6 +219,9 @@ def _load_from_json(json_path: str):
     if not isinstance(data, dict):
         log.warning(f"mtwn: app.json root is not dict path={json_path}")
         return None
+    version = data.get("version", 0)
+    if not isinstance(version, int):
+        version = 0
     items = data.get("items", [])
     if not isinstance(items, list):
         log.warning(f"mtwn: app.json 'items' field is not list path={json_path}")
@@ -241,7 +278,7 @@ def _load_from_json(json_path: str):
             if k in meta:
                 meta[k] = v
         fixed.append(meta)
-    return (fixed, app_beep_map)
+    return (fixed, app_beep_map, version)
 
 
 def _migrate_from_list(list_path: str) -> list:
@@ -289,8 +326,11 @@ def _save_to_disk(list_path: str, state: dict) -> bool:
         return False
 
     tmp = json_path + ".tmp"
+    # v7: 온음계(C major 7음 × 5옥타브 = 35) 테이블 기반 순차 할당 포맷.
+    # v6(반음 64)에서 테이블 크기와 의미가 동시에 바뀌었으므로 v6 이하 파일은
+    # _load_state ⑥단계에서 전체 재배정된 뒤 여기 도달해 v7로 승격 저장된다.
     payload = {
-        "version": 4,
+        "version": 7,
         "appBeepMap": dict(state.get("appBeepMap", {})),
         "items": state["items"][:MAX_ITEMS],
     }
@@ -386,21 +426,21 @@ def _mark_dirty_if_changed(state: dict, new_items: list, changed: bool) -> bool:
 
 
 def _ensure_beep_assignments(state: dict) -> bool:
-    """appBeepMap과 tabBeepIdx를 채워 넣는다. v3→v4 마이그레이션 핵심.
+    """appBeepMap과 tabBeepIdx를 채워 넣는다. v3→v6 마이그레이션 핵심.
 
     처리 순서 (결정론적):
-        ① state['items'] 중 scope=window entry 순회해 appId 집합 수집
-        ② appBeepMap에 빠진 appId 있으면 거리 기반 재할당 (순서: 등장 순)
-        ③ scope=window entry 중 tabBeepIdx 없는 항목은 같은 appId의 기존
-           tabBeepIdx 세트와 거리 최대값으로 재할당
+        ① state['items'] 순회해 appId 집합을 등장 순으로 수집
+        ② appBeepMap에 빠진 appId 있으면 순차 할당(`_assign_next_idx`) —
+           등장 순서대로 BEEP_USABLE_START부터 반음씩 위로
+        ③ scope=window entry 중 tabBeepIdx 없는 항목은 같은 appId 내 기존
+           tabBeepIdx의 max+1로 할당 (앱별 독립 0부터)
         ④ 하나라도 추가됐으면 changed=True 반환 (호출부가 dirty/save 처리)
 
     이 함수는 state['appBeepMap']과 각 scope=window entry의 tabBeepIdx를 제자리
     변경한다. scope=app entry는 tabBeepIdx를 갖지 않으므로 건너뛴다.
 
-    포화 처리 (len(used) >= BEEP_TABLE_SIZE): `_assign_distant_idx`가 이미 중복
-    허용 방식으로 최대 거리 idx를 반환하므로 별도 분기 없이 동작. log.warning
-    남기고 할당 진행.
+    포화 처리 (max+1 >= BEEP_USABLE_SIZE): `_assign_next_idx`가 구간 내 wrap 후
+    log.warning 후 반환. 중복 허용 방식이라 예외는 발생하지 않는다.
 
     Returns: 뭐라도 추가됐으면 True.
     """
@@ -409,23 +449,24 @@ def _ensure_beep_assignments(state: dict) -> bool:
     changed = False
 
     # ① + ②: appBeepMap 채우기. scope 관계없이 모든 entry의 appId에 대해 할당.
+    # v5부터 할당 구간을 [BEEP_USABLE_START, BEEP_USABLE_END)로 축소.
     for it in items:
         app_id = it.get("appId", "")
         if not app_id or app_id in app_beep_map:
             continue
         used = list(app_beep_map.values())
-        if len(set(used)) >= BEEP_TABLE_SIZE:
+        if len(set(used)) >= BEEP_USABLE_SIZE:
             log.warning(
-                f"mtwn: appBeepMap saturated (>= {BEEP_TABLE_SIZE}), "
+                f"mtwn: appBeepMap saturated (>= {BEEP_USABLE_SIZE} usable slots), "
                 f"appId={app_id!r} will share existing idx"
             )
-        new_idx = _assign_distant_idx(used, size=BEEP_TABLE_SIZE)
+        new_idx = _assign_next_idx(used, size=BEEP_USABLE_SIZE, start=BEEP_USABLE_START)
         app_beep_map[app_id] = new_idx
         changed = True
         log.info(f"mtwn: assign appBeepMap[{app_id!r}] = {new_idx}")
 
-    # ③: scope=window entry에 tabBeepIdx 채우기. 같은 appId 내 기존 tabBeepIdx와
-    # 거리 최대화. 이미 있는 항목은 건드리지 않음.
+    # ③: scope=window entry에 tabBeepIdx 채우기. 같은 appId 내 기존 tabBeepIdx의
+    # max+1로 순차 할당 (앱별 독립 카운터). 이미 있는 항목은 건드리지 않음.
     tab_idx_by_app = {}
     for it in items:
         if it.get("scope") != SCOPE_WINDOW:
@@ -441,12 +482,13 @@ def _ensure_beep_assignments(state: dict) -> bool:
             continue
         app_id = it.get("appId", "")
         used = tab_idx_by_app.setdefault(app_id, [])
-        if len(set(used)) >= BEEP_TABLE_SIZE:
+        if len(set(used)) >= BEEP_USABLE_SIZE:
             log.warning(
-                f"mtwn: tabBeepIdx saturated for appId={app_id!r}, "
+                f"mtwn: tabBeepIdx saturated for appId={app_id!r} "
+                f"(>= {BEEP_USABLE_SIZE} usable slots), "
                 f"key={it.get('key')!r} will share existing idx"
             )
-        new_idx = _assign_distant_idx(used, size=BEEP_TABLE_SIZE)
+        new_idx = _assign_next_idx(used, size=BEEP_USABLE_SIZE, start=BEEP_USABLE_START)
         it["tabBeepIdx"] = new_idx
         used.append(new_idx)
         changed = True
@@ -497,7 +539,12 @@ def _load_state(list_path: str) -> dict:
     if list_path in _states:
         return _states[list_path]
 
-    state = {"items": [], "appBeepMap": {}, "dirty": False, "corrupted": False}
+    # source_version: 디스크에서 읽어 온 원본 버전. 새 설치/legacy 마이그레이션은 0.
+    # v5 이상이면 ⑥단계 강제 재배정을 건너뛴다(이미 새 범위로 안정된 파일).
+    state = {
+        "items": [], "appBeepMap": {}, "dirty": False, "corrupted": False,
+        "source_version": 0,
+    }
     # ② 경로 결정
     json_path = _json_path(list_path)
 
@@ -519,9 +566,10 @@ def _load_state(list_path: str) -> dict:
             state["corrupted"] = True
             # state["items"]는 기본값 [] 유지. dirty=False도 유지(손상을 덮어쓰지 않도록).
         else:
-            loaded_items, loaded_map = loaded
+            loaded_items, loaded_map, loaded_version = loaded
             state["items"] = loaded_items
             state["appBeepMap"] = loaded_map
+            state["source_version"] = loaded_version
             json_trustworthy = True
     elif os.path.exists(list_path):
         # 구형 app.list 마이그레이션
@@ -529,11 +577,13 @@ def _load_state(list_path: str) -> dict:
         if migrated:
             state["items"] = migrated
             state["dirty"] = True
-            # 비프 할당을 먼저 채워 두고 저장 (디스크에 v4 포맷으로 기록).
+            # 비프 할당을 먼저 채워 두고 저장 (디스크에 v6 포맷으로 기록).
             _ensure_beep_assignments(state)
             if _save_to_disk(list_path, state):
                 state["dirty"] = False
                 json_trustworthy = True
+            # 방금 새 순차 할당을 마쳤으므로 ⑥단계 재배정 루프를 건너뛰도록 표시.
+            state["source_version"] = 7
             # 저장 실패 시 dirty 유지 → 다음 flush에서 재시도
 
     # ④ legacy 백업 — JSON이 신뢰 가능한 상태로 확보된 뒤 1회.
@@ -551,13 +601,34 @@ def _load_state(list_path: str) -> dict:
             state["dirty"] = False
         # 저장 실패 시 dirty 유지 → 다음 flush/save에서 재시도
 
-    # ⑥ v3→v4 비프 할당 마이그레이션. 이미 v4 완결 파일이면 no-op.
-    # legacy app.list 경로는 ③에서 이미 ensure한 뒤 저장했으므로 여기서는 보통
-    # 변경 없다. JSON 로드 경로에서 appBeepMap/tabBeepIdx가 빠졌을 때만 채움.
+    # ⑥ 비프 할당 마이그레이션.
+    #   - v7 파일: _ensure_beep_assignments가 누락된 항목만 채움 (no-op 또는 부분 보강).
+    #   - v6 이하 파일: 기존 할당을 모두 버리고 순차 방식으로 1회성 강제 재배정.
+    #     v6(반음 64)과 v7(온음계 35)은 테이블 크기와 주파수 의미가 동시에 바뀌어
+    #     기존 인덱스가 의미하던 음과 새 인덱스의 음이 다르다. 재할당 + 사용자의
+    #     "등록 순서대로 한 음씩 위로" 직관 모델 유지를 함께 달성.
+    #   - v5 이하도 같은 경로로 한 번에 v7까지 끌어올림.
+    #   - v3 이하(appBeepMap/tabBeepIdx 부재)도 동일 재배정 규칙으로 커버.
+    if state.get("source_version", 0) < 7:
+        if state.get("appBeepMap") or any(
+            "tabBeepIdx" in it for it in state["items"] if it.get("scope") == SCOPE_WINDOW
+        ):
+            log.info(
+                f"mtwn: migrate v{state.get('source_version', 0)}→v7, "
+                f"clearing legacy beep assignments for sequential reassignment "
+                f"in [{BEEP_USABLE_START}, {BEEP_USABLE_START + BEEP_USABLE_SIZE})"
+            )
+        state["appBeepMap"] = {}
+        for it in state["items"]:
+            if it.get("scope") == SCOPE_WINDOW and "tabBeepIdx" in it:
+                del it["tabBeepIdx"]
+        state["dirty"] = True
     if _ensure_beep_assignments(state):
         state["dirty"] = True
+    if state["dirty"]:
         if _save_to_disk(list_path, state):
             state["dirty"] = False
+            state["source_version"] = 7
 
     # ⑦ 캐시 등록
     _states[list_path] = state

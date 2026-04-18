@@ -16,9 +16,12 @@
    - NVDA API 사용 적절성, 이벤트 훅 안정성(`event_gainFocus`는 모든 포커스 전환마다 호출됨 → 성능/예외 처리 필수)
    - 스크린리더 접근성, 번역(`_()`) 누락, 설정(`config.conf`) 스키마 일관성
 2. 리뷰 지적사항 수정 후 재리뷰 (동일 지적 반복 방지 위해 최대 2회)
-3. 통과 시 `.claude/last-review.txt` 파일을 현재 시각으로 갱신 (Stop hook 마커)
+3. 리뷰 통과 시 **반드시 `uv run python build.py` 실행** — 사용자가 재빌드를 따로 요청하지 않아도 자동 수행.
+   - 빌드 실패 시 원인 수정 후 재실행. 성공 표기(`OK: multiTaskingWindowNotifier-*.nvda-addon`) 확인 필수.
+   - 과거 "리뷰는 통과했는데 재빌드를 빠뜨려 사용자가 구버전 애드온으로 테스트"한 이력 있음. 빌드는 리뷰와 동급의 필수 절차.
+4. 빌드 성공 후 `.claude/last-review.txt` 파일을 현재 시각으로 갱신 (Stop hook 마커)
    - Windows bash: `date > .claude/last-review.txt`
-4. 기록 후에만 사용자에게 "완료" 응답
+5. 기록 후에만 사용자에게 "완료" 응답. 응답에 생성된 `.nvda-addon` 파일명을 명시.
 
 **리뷰 강도 판단 기준**
 - "NVDA API 오용 / `nextHandler()` 누락 / 예외 미처리 / 접근성 회귀" → 반드시 수정 후 재통과
@@ -163,7 +166,7 @@ NVDA 스크린 리더 추가 기능으로 Alt+Tab를 눌렀을 때 여러 창을
   - globalPlugins\multiTaskingWindowNotifier\listDialog.py: 등록 목록 wx.Dialog. 다중 선택 + Delete 키 + 앱 항목 일괄 삭제 확인 흐름 제공
   - globalPlugins\multiTaskingWindowNotifier\settings.py: NVDA config 스키마 정의 및 register/get 헬퍼
   - globalPlugins\multiTaskingWindowNotifier\settingsPanel.py: NVDA 설정 대화상자의 "창 전환 알림" 패널 (SettingsPanel 구현)
-  - globalPlugins\multiTaskingWindowNotifier\app.json: v4 — top-level `appBeepMap`(appId→BEEP_TABLE idx) + items[].tabBeepIdx(scope=window 전용). 등록된 앱·창 목록 + 메타(전환 카운트/마지막 사용 시각/등록일). v3 로드 시 거리 기반 자동 재할당. `app.list`가 있으면 최초 로드 시 자동 마이그레이션 후 `app.list.bak`으로 백업
+  - globalPlugins\multiTaskingWindowNotifier\app.json: v7 — top-level `appBeepMap`(appId→BEEP_TABLE idx) + items[].tabBeepIdx(scope=window 전용). 등록된 앱·창 목록 + 메타(전환 카운트/마지막 사용 시각/등록일). v6 이하 로드 시 1회성 순차 재할당(v7은 온음계 테이블로 전환되며 인덱스 의미가 달라져 무조건 재배정). `app.list`가 있으면 최초 로드 시 자동 마이그레이션 후 `app.list.bak`으로 백업
   - globalPlugins\multiTaskingWindowNotifier\tabClasses.json: 앱별 editor/overlay wcn 매핑. 파일 없으면 기본값(메모장/Notepad++)으로 자동 생성. 새 앱에서 NVDA+Shift+T 등록 시 editor wcn 자동 학습
 ## *중요* 모듈 문서화 원칙
 - **새 모듈 추가 시**: 위 "주요 파일" 목록에 파일명과 역할을 한 줄로 추가
@@ -178,9 +181,9 @@ multiTaskingWindowNotifier/
 └── globalPlugins/
     └── multiTaskingWindowNotifier/
         ├── __init__.py                    # GlobalPlugin + 스크립트/이벤트 훅
-        ├── constants.py                   # ADDON_NAME, MAX_ITEMS(128), BEEP_TABLE, BEEP_TABLE_SIZE(64)
+        ├── constants.py                   # ADDON_NAME, MAX_ITEMS(128), BEEP_TABLE(C major 온음계 35음), BEEP_TABLE_SIZE(35)
         ├── appIdentity.py                 # 앱 식별/복합키 + normalize_title
-        ├── appListStore.py                # v4 JSON 저장소 (appBeepMap, tabBeepIdx, 거리 기반 할당)
+        ├── appListStore.py                # v7 JSON 저장소 (appBeepMap, tabBeepIdx, 순차 할당)
         ├── tabClasses.py                  # 앱별 editor/overlay wcn 매핑 + 자동 학습
         ├── windowInfo.py                  # 창 정보·경로 헬퍼 (title normalize 적용)
         ├── beepPlayer.py                  # v4 2음 비프 (core.callLater 기반 gap 예약)
@@ -200,11 +203,10 @@ multiTaskingWindowNotifier/
   - `scriptHandler.script`: 단축키 등록 데코레이터
   - `addonHandler`: 번역 초기화
 - **이벤트 후킹**
-  - `event_gainFocus` 단일 경로. 4분기(Phase B):
+  - `event_gainFocus` 단일 경로. 3분기(Phase B):
     1. `obj.wcn == "Windows.UI.Input.InputSite.WindowClass"` → Alt+Tab 오버레이. `obj.name`이 탭 제목.
     2. `tabClasses.is_overlay_class(appId, fgWcn)` → 앱별 오버레이(예: Notepad++ MRU `fgWcn='#32770'`). `obj.name`이 탭 제목.
     3. `tabClasses.is_editor_class(appId, obj.wcn)` → 에디터 자식 컨트롤(예: 메모장 `RichEditD2DPT`, Notepad++ `Scintilla`). `foreground.name`이 탭 제목.
-    4. `enableAllWindows=True` → 모든 포커스 전환. `foreground.name`.
   - 각 분기의 raw title은 `normalize_title`을 거쳐 꼬리 " - 앱명" 서픽스를 제거한 뒤 매칭. appId가 복합키 1등이라 title에 앱명 중복 저장하지 않는다.
   - 같은 키 0.3초 내 재매칭은 `_MATCH_DEDUP_SEC` 가드로 한 번만.
 - **파일 저장소**
@@ -212,11 +214,11 @@ multiTaskingWindowNotifier/
   - `tabClasses` 모듈: 앱별 editor/overlay wcn 세트. `load()`가 DEFAULT와 합집합 병합, `is_*_class`는 캐시 set 조회(고빈도), `learn_editor`는 등록 성공 훅에서 best-effort 호출.
 
 ## 데이터 포맷
-### app.json (v4, 2차원 비프 도입)
+### app.json (v7, 온음계 테이블로 전환)
 ```json
 {
-  "version": 4,
-  "appBeepMap": {"chrome": 0, "notepad": 63},
+  "version": 7,
+  "appBeepMap": {"chrome": 0, "notepad": 1},
   "items": [
     {"key": "chrome", "scope": "app",
      "appId": "chrome", "title": "",
@@ -232,19 +234,21 @@ multiTaskingWindowNotifier/
 ```
 - **인코딩**: UTF-8 (ensure_ascii=False)
 - **원자적 저장**: `.tmp` → `os.replace` 패턴
-- **최대 항목**: 128개 (MAX_ITEMS). v4부터 BEEP_TABLE_SIZE(64)와 디커플.
+- **최대 항목**: 128개 (MAX_ITEMS). v4부터 BEEP_TABLE_SIZE(v7부터 35)와 디커플.
 - **scope 필드** (v3 신설)
   - `"window"` — `appId|title` 복합키. 정확 매치 시 2음(a→b) 재생.
   - `"app"` — `appId` 단독 키. 같은 appId의 어떤 창/탭이든 fallback으로 a 단음.
 - **appBeepMap** (v4 신설, top-level): `{appId: BEEP_TABLE idx}`. 같은 appId의 모든 scope=window entry가 앱 비프(a)로 공유. scope=app entry가 없어도 자동 할당되어 모든 등록 appId가 base 음을 보유.
-- **tabBeepIdx** (v4 신설, scope=window entry 전용): 같은 appId 내에서 고유한 탭 비프(b) 인덱스. 이론 조합 앱 64 × 탭 64 = 4096.
-- **할당 알고리즘**: `_assign_distant_idx` — 기존 used 세트와 L1 거리 최대화. 첫 할당은 0, 두 번째는 63, 세 번째는 31, ... 포화 시 중복 허용 + log.warning.
+- **tabBeepIdx** (v4 신설, scope=window entry 전용): 같은 appId 내에서 고유한 탭 비프(b) 인덱스. v7 이론 조합 앱 35 × 탭 35 = 1225.
+- **할당 알고리즘** (v6 전환): `_assign_next_idx` — 등록 순서 기반 순차. appBeepMap은 앱 등록 순서대로 BEEP_USABLE_START부터 0, 1, 2, ... 한 슬롯씩 상승(v7 기준 도→레→미 …). tabBeepIdx는 appId별 독립 카운터로 각 앱마다 0부터. 중간 gap은 재사용하지 않고 항상 max+1. 포화 시 구간 내 wrap + log.warning.
 - **메타 필드**
   - `key` / `appId` / `title` — scope=app은 title이 빈 문자열
   - `registeredAt` / `switchCount` / `lastSeenAt` — 등록/사용 메타
 - **title 정규화** (Phase B): 등록 시점(`windowInfo.get_current_window_info`)과 로드 시점(`appListStore._load_state`) 모두 `normalize_title`을 거쳐 꼬리 " - 앱명" 한 덩이 제거.
-- **v3 → v4 자동 마이그레이션**: appBeepMap/tabBeepIdx가 없으면 `_ensure_beep_assignments`가 거리 기반으로 재할당. 사용자는 주파수 재학습 필요(변별력 최대화). 기존 enumerate idx는 버림.
-- **v2 → v3 → v4 자동 마이그레이션**: scope 필드 누락 시 `"window"`로 보정 후 v4 할당까지 연쇄 진행.
+- **v6 → v7 자동 마이그레이션**: 반음 64음 테이블(v6)에서 C major 온음계 35음(v7)으로 교체되며 인덱스 의미 자체가 달라진다. 로드 시 기존 appBeepMap/tabBeepIdx를 전부 버리고 순차 재배정 후 `version=7`로 저장. 1회성, 사용자는 주파수 재학습 필요.
+- **v5 이하 자동 마이그레이션**: 거리 최대화 방식(v4/v5)도 동일 경로로 한 번에 v7까지 끌어올려 재배정.
+- **v3 이하 자동 마이그레이션**: appBeepMap/tabBeepIdx 필드가 부재하면 동일 재배정 경로로 v7 할당 채움.
+- **v2 → v3 → v7 자동 마이그레이션**: scope 필드 누락 시 `"window"`로 보정 후 v7 할당까지 연쇄 진행.
 
 ### tabClasses.json (v1, Phase B 신설)
 ```json
@@ -279,8 +283,8 @@ multiTaskingWindowNotifier/
 - `splitKey(entry)`: 복합키 파싱, 구형 포맷 호환
 - `normalize_title(name)`: 꼬리 " - 앱명" 한 덩이 제거. Alt+Tab obj.name, editor fg.name, MRU obj.name이 같은 형태로 떨어지게 함.
 
-### 비프음 테이블 / 재생 (v4 2차원)
-- `BEEP_TABLE`: 64개 주파수 (130Hz~4978Hz, 반음 단위). `BEEP_TABLE_SIZE` 상수로 노출.
+### 비프음 테이블 / 재생 (v4 2차원, v7 온음계 전환)
+- `BEEP_TABLE`: 35개 주파수 (C3 130Hz ~ B7 3951Hz, C major 온음계 7음 × 5옥타브). `BEEP_TABLE_SIZE` 상수로 노출. v7 이전은 반음 64음이었으나 인접 슬롯 변별이 약하다는 피드백으로 온음계로 교체 — 1번과 2번이 "도→레" 전음 간격으로 분리돼 명확히 구분된다.
 - `play_beep(app_idx, tab_idx=None, scope, duration, gap_ms, left, right)` — 2차원 비프.
   - scope=app 또는 tab_idx=None: `tones.beep(BEEP_TABLE[app_idx])` 단음 1회.
   - scope=window + tab_idx 지정: a 재생 → `core.callLater(gap_ms, tones.beep, b)` 2음.
@@ -289,7 +293,7 @@ multiTaskingWindowNotifier/
   - real_app_id = matched_key에서 splitKey로 추출 (Alt+Tab 오버레이 title 역매핑 호환).
   - app_idx = appBeepMap[real_app_id] (자동 할당 보장). tab_idx = entry.tabBeepIdx (scope=window만).
   - miss 시 0으로 폴백 + log.warning.
-- duration / gap_ms / left / right는 `config.conf` 설정 (기본 50 / 15 / 50 / 50).
+- duration / gap_ms / left / right는 `config.conf` 설정 (기본 50 / 100 / 50 / 50). gap_ms는 15→60→100ms로 두 차례 상향 — 60ms에서도 두 음이 한 덩어리로 뭉쳐 들린다는 피드백 후 재조정.
 
 ### 등록된 단축키
 - **NVDA+Shift+T**: 현재 창/앱 추가 (다이얼로그로 scope 선택)
@@ -368,7 +372,7 @@ multiTaskingWindowNotifier/
 - **방법**:
   - 등록 단위가 2계층 — "앱 전체"(SCOPE_APP)와 "특정 창/탭"(SCOPE_WINDOW). 매칭 우선순위 창>앱.
   - 비프 톤은 같은 appId 창들끼리 같은 base 주파수를 공유하고 등록 순서만큼 반음씩 위로 변주(`beepPlayer.play_beep`).
-  - 탭 전환은 `event_gainFocus` 단일 경로. Phase B에서 4분기(Alt+Tab 오버레이 / 앱별 오버레이 / 에디터 자식 컨트롤 / enableAllWindows)로 확장 + 모든 title은 `normalize_title` 통과.
+  - 탭 전환은 `event_gainFocus` 단일 경로. Phase B에서 3분기(Alt+Tab 오버레이 / 앱별 오버레이 / 에디터 자식 컨트롤)로 확장 + 모든 title은 `normalize_title` 통과.
 - **단축키 변화**:
   - NVDA+Shift+T: 다이얼로그로 "이 창만/이 앱 전체" 선택. scope=window 등록 성공 시 focus 자식 컨트롤의 wcn을 `tabClasses.json`의 editor에 자동 학습.
   - NVDA+Shift+D: 정확 매치(창 키 또는 앱 키)만 삭제 — 다른 앱의 동일 title 창 오삭제 방지

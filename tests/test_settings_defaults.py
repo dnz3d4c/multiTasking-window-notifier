@@ -55,11 +55,12 @@ def test_register_creates_section_and_fills_defaults(real_config):
     assert ADDON_KEY in real_config
     section = real_config[ADDON_KEY]
     # v4: 2음 재생으로 duration 단축 + gap 신설. maxItems는 BEEP_TABLE과 디커플.
+    # beepGapMs는 15→60→100으로 두 차례 상향. 60에서도 두 음이 한 덩어리로
+    # 들린다는 피드백 후 100ms로 재조정.
     assert section["beepDuration"] == 50
-    assert section["beepGapMs"] == 15
+    assert section["beepGapMs"] == 100
     assert section["beepVolumeLeft"] == 50
     assert section["beepVolumeRight"] == 50
-    assert section["enableAllWindows"] is False
     assert section["maxItems"] == 128
 
 
@@ -88,7 +89,6 @@ def test_get_fallback_when_section_missing(real_config):
 
     # register 없이 get 호출 — 섹션 부재 시 CONFSPEC default 폴백
     assert settings.get("beepDuration") == 50
-    assert settings.get("enableAllWindows") is False
 
 
 def test_get_fallback_when_key_missing(real_config):

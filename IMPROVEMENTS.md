@@ -90,27 +90,15 @@ except Exception as e:
 
 ---
 
-### 1.4 windowClassName 조건 제거 또는 설정화
-**현재**: `"Windows.UI.Input.InputSite.WindowClass"`에서만 동작
-**문제**: 대부분의 일반 앱에서 작동하지 않음
-**개선**:
-```python
-# 옵션 1: 조건 제거 (모든 창에서 동작)
-def event_gainFocus(self, obj, nextHandler):
-    o = api.getFocusObject()
-    if o:
-        title = (getattr(o, "name", "") or "").strip()
-        if title:
-            # 비프음 재생 로직
-            ...
-    nextHandler()
-
-# 옵션 2: 설정으로 제어
-if config.conf["multiTaskingWindowNotifier"]["enableAllWindows"] or \
-   getattr(o, "windowClassName", "") == "Windows.UI.Input.InputSite.WindowClass":
-    # 비프음 재생
-```
-**이유**: Alt+Tab으로 전환 가능한 대부분의 창은 다른 windowClassName을 가짐
+### 1.4 windowClassName 조건 제거 또는 설정화 (종료)
+**상태**: Phase B의 `_determine_match_source` 3분기(Alt+Tab 오버레이 /
+앱별 overlay / 에디터 자식 컨트롤) 커버로 대체됨.
+**경과**:
+- 초기: `"Windows.UI.Input.InputSite.WindowClass"`에서만 동작 (본 이슈 원안).
+- 중간: "옵션 2" 초안이 `enableAllWindows` 설정으로 실제 도입되어 catchall 분기 역할 수행.
+- 최종(2026-04): Phase B 3분기가 주요 시나리오를 모두 커버 → `enableAllWindows`는 의도
+  불명확 + 오작동 위험(대화상자/서브윈도우 제목이 등록 창 제목과 우연 일치 시 오비프)
+  이유로 제거. 미커버 앱은 NVDA+Shift+T로 editor wcn을 학습시키는 게 정규 경로.
 
 ---
 

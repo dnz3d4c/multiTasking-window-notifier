@@ -1,37 +1,45 @@
 # -*- coding: utf-8 -*-
 # GNU General Public License v2.0-or-later
 
-"""앱별 탭 컨트롤 wcn 매핑 + 자동 학습.
+"""앱별 탭 컨트롤 wcn 매핑.
 
-데이터 포맷 (`tabClasses.json`, version=1):
+데이터 포맷 (`tabClasses.json`, version=2):
     {
-      "version": 1,
+      "version": 2,
       "apps": {
         "notepad":   {"editor": ["RichEditD2DPT"], "overlay": []},
-        "notepad++": {"editor": ["Scintilla"],     "overlay": ["#32770"]}
+        "notepad++": {"overlay": ["#32770"]}
       }
     }
 
 의미:
-    - editor: 탭 전환 **확정 후** focus가 오는 자식 컨트롤의 windowClassName.
-              이 wcn이 focus면 `foreground.name`을 탭 제목으로 삼아 매칭.
-    - overlay: 탭 선택 **오버레이 상위창**의 windowClassName
+    - editor: Ctrl+Tab 확정 후 포커스가 오는 자식 컨트롤의 windowClassName.
+              같은 탭 제목(예: 메모장 "제목 없음" 여러 개)을 구분하려면
+              fg.name만으로는 불가능하고 자식 컨트롤의 hwnd가 탭마다 다르다는
+              점을 이용해야 한다. 이 wcn이 focus면 `foreground.name`을 탭 제목,
+              `obj.windowHandle`(자식)을 tab_sig로 삼아 매칭한다.
+              **중요 게이트**: `wcn != fg_wcn` 조건이 필수. Firefox처럼 자식
+              wcn이 최상위와 같은 앱은 이 분기에서 자동 제외되어 "모든 포커스
+              이동마다 매칭" 병리가 재발하지 않는다.
+    - overlay: 탭 선택 오버레이 상위창의 windowClassName
               (= `api.getForegroundObject().windowClassName`).
               이 fgWcn이면 `obj.name`(리스트 항목 자체)을 탭 제목으로 삼아 매칭.
 
+탭 확정 전환은 **두 경로로 분업**한다:
+    1. `event_nameChange` — 대부분의 앱(Firefox/Notepad++ 포함). 창의 title bar
+       자체가 바뀌므로 foreground의 name 변경으로 직접 감지.
+    2. editor 분기 — 메모장처럼 **같은 제목의 여러 탭**이 일상적인 앱. title이
+       안 바뀌어 nameChange가 못 잡는 전환을 자식 hwnd 변경으로 포착.
+
 파일이 없으면 `DEFAULT_TAB_CLASSES`로 첫 `load()` 시 자동 생성된다.
-파일이 있으면 DEFAULT와 **합집합 병합**(editor/overlay 각각) 후 변경이 있으면 저장.
+파일이 있으면 DEFAULT와 합집합 병합(editor/overlay 각각) 후 변경이 있으면 저장.
 
 외부 API:
     load(path)                       -> None   (로드 + 기본값 병합 + 캐시 채움)
     save(path)                       -> bool   (현재 캐시를 디스크에 원자적 저장)
     is_editor_class(appId, wcn)      -> bool
     is_overlay_class(appId, fg_wcn)  -> bool
-    learn_editor(appId, wcn)         -> bool   (신규 추가했으면 True + save)
     reset_cache()                    -> None   (테스트 전용)
-
-`learn_overlay`는 이번 Phase에서 노출하지 않는다. 수동 학습 단축키/UI가 별도
-Phase로 다뤄질 때 함께 공개. 기본값(`#32770`)만으로 Notepad++ MRU는 즉시 동작.
 """
 
 import json
@@ -40,20 +48,22 @@ import os
 from logHandler import log
 
 
-# 내장 기본값 — 최초 load 시 빈 파일에 기록되고, 기존 파일에도 합집합으로 병합된다.
-# 실측 근거(Phase A 진단 로그):
-#   - 메모장 Ctrl+Tab: obj.wcn='RichEditD2DPT'
-#   - Notepad++ Ctrl+Tab (최종): obj.wcn='Scintilla'
+# 내장 기본값. 최초 load 시 빈 파일에 기록되고, 기존 파일에도 합집합으로 병합된다.
+# 실측 근거(진단 로그):
+#   - 메모장 Ctrl+Tab: obj.wcn='RichEditD2DPT' (자식), fgWcn='Notepad' (상위)
 #   - Notepad++ MRU 오버레이 진행 중: fgWcn='#32770'
+# editor 등재 기준: **같은 제목의 여러 탭**이 정상 케이스인 앱. 메모장이
+# 대표. Notepad++는 파일명 기반이라 title 중복이 드물어 nameChange만으로
+# 충분(필요시 추후 추가). Firefox는 자식==최상위 wcn이라 editor 분기에
+# 등재하면 안 되고 nameChange가 담당.
 DEFAULT_TAB_CLASSES = {
     "notepad":   {"editor": ("RichEditD2DPT",), "overlay": ()},
-    "notepad++": {"editor": ("Scintilla",),     "overlay": ("#32770",)},
+    "notepad++": {"editor": (),                 "overlay": ("#32770",)},
 }
 
 
-# 모듈 수준 캐시. 단일 파일(경로)만 다루므로 path-keyed 사전 대신 단일 상태로 둔다.
+# 모듈 수준 캐시.
 # _state = {"path": str, "apps": {appId: {"editor": set[str], "overlay": set[str]}}}
-# set을 쓰는 이유는 is_*_class가 event_gainFocus에서 고빈도 호출되기 때문(O(1) 조회).
 _state = None
 
 
@@ -78,10 +88,7 @@ def _empty_apps_from_defaults() -> dict:
 
 
 def _merge_defaults_into(apps: dict) -> bool:
-    """DEFAULT_TAB_CLASSES의 항목을 apps에 합집합으로 병합. 추가분이 있으면 True.
-
-    사용자가 실수로 지워도 다음 로드 시 기본값이 자동으로 복원된다.
-    """
+    """DEFAULT_TAB_CLASSES의 editor/overlay 항목을 apps에 합집합으로 병합."""
     changed = False
     for appId, spec in DEFAULT_TAB_CLASSES.items():
         entry = apps.setdefault(appId, {"editor": set(), "overlay": set()})
@@ -97,11 +104,7 @@ def _merge_defaults_into(apps: dict) -> bool:
 
 
 def _load_from_disk(path: str):
-    """디스크 파싱. 파일 없음=None (신규), 손상=빈 dict + 로그.
-
-    None vs 빈 dict 구분: 없으면 기본값으로 초기 생성해 저장, 손상이면 캐시는
-    기본값으로 채우되 덮어쓰기는 함(사용자가 뭔가 잘못 편집한 걸 정상으로 복구).
-    """
+    """디스크 파싱. 파일 없음=None (신규), 손상=빈 dict + 로그."""
     if not os.path.exists(path):
         return None
     try:
@@ -141,16 +144,15 @@ def _load_from_disk(path: str):
 
 
 def _save_to_disk(path: str, apps: dict) -> bool:
-    """원자적 저장(.tmp → os.replace). appListStore와 동일 패턴."""
+    """원자적 저장(.tmp → os.replace). version=2 포맷."""
     try:
         os.makedirs(os.path.dirname(path), exist_ok=True)
     except Exception:
         log.error(f"mtwn: tabClasses mkdir failed path={path}", exc_info=True)
         return False
 
-    # 안정적인 직렬화 순서(알파벳)로 diff 친화적. 기능상 영향 없음.
     payload = {
-        "version": 1,
+        "version": 2,
         "apps": {
             appId: {
                 "editor": sorted(entry.get("editor", set())),
@@ -184,12 +186,10 @@ def load(path: str) -> None:
     disk_apps = _load_from_disk(path)
 
     if disk_apps is None:
-        # 파일 없음 — 기본값으로 초기 생성
         apps = _empty_apps_from_defaults()
         _save_to_disk(path, apps)
         log.info(f"mtwn: tabClasses.json created with defaults path={path}")
     else:
-        # 파싱 성공(또는 손상이라 빈 dict) — DEFAULT 항목 누락분 병합
         apps = disk_apps
         if _merge_defaults_into(apps):
             _save_to_disk(path, apps)
@@ -205,7 +205,7 @@ def save(path: str) -> bool:
 
 
 def is_editor_class(appId: str, wcn: str) -> bool:
-    """event_gainFocus 고빈도 호출 대응. 캐시 조회만."""
+    """event_gainFocus 고빈도 호출 대응. 캐시 set 조회만."""
     if _state is None or not appId or not wcn:
         return False
     entry = _state["apps"].get(appId)
@@ -215,32 +215,10 @@ def is_editor_class(appId: str, wcn: str) -> bool:
 
 
 def is_overlay_class(appId: str, fg_wcn: str) -> bool:
-    """event_gainFocus 고빈도 호출 대응. 캐시 조회만."""
+    """event_gainFocus 고빈도 호출 대응. 캐시 set 조회만."""
     if _state is None or not appId or not fg_wcn:
         return False
     entry = _state["apps"].get(appId)
     if not entry:
         return False
     return fg_wcn in entry.get("overlay", set())
-
-
-def learn_editor(appId: str, wcn: str) -> bool:
-    """appId의 editor 리스트에 wcn 추가 + 저장. 신규 추가면 True, 이미 있으면 False.
-
-    호출부(등록 성공 훅)에서 try/except로 감싸 best-effort로 쓰면 된다. 저장 실패
-    시에도 예외 없이 False 반환(로그는 `_save_to_disk`가 찍는다).
-    """
-    if _state is None or not appId or not wcn:
-        return False
-    apps = _state["apps"]
-    entry = apps.setdefault(appId, {"editor": set(), "overlay": set()})
-    editor = entry.setdefault("editor", set())
-    if wcn in editor:
-        return False
-    editor.add(wcn)
-    if _save_to_disk(_state["path"], apps):
-        log.info(f"mtwn: tabClasses learned editor appId={appId!r} wcn={wcn!r}")
-        return True
-    # 저장 실패 시 메모리 상태는 롤백
-    editor.discard(wcn)
-    return False

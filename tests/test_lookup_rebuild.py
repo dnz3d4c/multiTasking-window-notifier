@@ -115,5 +115,5 @@ def test_alt_tab_overlay_triggers_beep_via_title_fallback(plugin, monkeypatch):
 
     plugin.event_gainFocus(focus, lambda: None)
 
-    # v4: appBeepMap[notepad]=0, 첫 window tabBeepIdx=0, scope=window
+    # v6 순차 할당: appBeepMap[notepad]=0 (첫 앱), 첫 window tabBeepIdx=0, scope=window.
     assert called == [(0, 0, "window")], f"비프 호출 누락: got={called}"

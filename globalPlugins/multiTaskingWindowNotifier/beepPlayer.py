@@ -14,8 +14,8 @@ v4 2차원 비프:
 타이밍 원칙:
     - gap_ms는 `wx.CallLater`로 비동기 예약. NVDA 메인 GUI 스레드에서 실행되며
       `event_gainFocus`를 블로킹하지 않는다.
-    - duration 기본값은 50ms (v3의 100ms 단음 대비 절반). 2음 총 115ms 체감은
-      v3 100ms와 비슷.
+    - duration 기본값은 50ms. 2음 총 150ms(duration 50 + gap 100)로 v3 단음
+      100ms보다 길지만 두 음 변별을 위한 여유가 필수.
 """
 
 import tones
@@ -27,7 +27,11 @@ from .constants import BEEP_TABLE, BEEP_TABLE_SIZE, SCOPE_APP, SCOPE_WINDOW
 # config가 미주입되거나 테스트 환경일 때 사용할 기본값.
 # 실제 런타임 값은 __init__.py에서 config.conf로 읽어 전달.
 BEEP_DURATION_MS = 50
-BEEP_GAP_MS = 15
+# 앱음과 탭음 사이 간격. 15ms(초기값) → 60ms → 100ms로 두 차례 상향.
+# 60ms에서도 "딩동" 한 덩어리처럼 뭉쳐 들린다는 실전 피드백이 있어
+# 100ms로 재조정. duration 50ms + gap 100ms = 총 150ms로 두 음이
+# 뚜렷이 "딩 … 동"으로 분리되면서도 Alt+Tab 체감 속도는 유지된다.
+BEEP_GAP_MS = 100
 BEEP_LEFT_VOL = 50
 BEEP_RIGHT_VOL = 50
 

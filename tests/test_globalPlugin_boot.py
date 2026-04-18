@@ -3,7 +3,7 @@
 예외 없이 끝내는지 검증.
 
 회귀 시나리오: register()가 defaults를 주입하지 않던 시절에는
-event_gainFocus 안의 settings.get("enableAllWindows")가 KeyError를 던졌고,
+event_gainFocus 안의 settings.get(...)이 KeyError를 던졌고,
 외곽 except가 이걸 조용히 삼켜서 비프가 사라졌다. 이 스모크는 빈 설정
 상황에서도 이벤트 핸들러가 정상 경로(nextHandler 호출)를 완주하는지
 보장해, 같은 회귀가 다시 들어왔을 때 곧바로 실패하게 한다.
@@ -56,8 +56,7 @@ def test_boot_creates_config_defaults(booted_plugin):
 
     assert ADDON_KEY in conf
     assert conf[ADDON_KEY]["beepDuration"] == 50
-    assert conf[ADDON_KEY]["beepGapMs"] == 15
-    assert conf[ADDON_KEY]["enableAllWindows"] is False
+    assert conf[ADDON_KEY]["beepGapMs"] == 100
 
 
 def test_event_gain_focus_survives_empty_state(booted_plugin):

@@ -21,11 +21,11 @@ def _read_json(path):
         return json.load(f)
 
 
-def test_save_writes_version_4(tmp_path):
+def test_save_writes_version_7(tmp_path):
     path = _list_path(tmp_path)
     appListStore.save(path, ["a|t1"])
     data = _read_json(_json_path(tmp_path))
-    assert data["version"] == 4
+    assert data["version"] == 7
 
 
 def test_new_keys_default_to_window_scope(tmp_path):
@@ -95,8 +95,8 @@ def test_v2_file_loads_with_window_scope_injected(tmp_path):
     assert m2["switchCount"] == 1
 
 
-def test_v2_file_promotes_to_v4_on_load(tmp_path):
-    """v2 로드 시 스스로 v4로 승격 (appBeepMap/tabBeepIdx 자동 주입)."""
+def test_v2_file_promotes_to_v7_on_load(tmp_path):
+    """v2 로드 시 스스로 v7로 승격 (scope 주입 + appBeepMap/tabBeepIdx 순차 할당)."""
     json_path = _json_path(tmp_path)
     os.makedirs(os.path.dirname(json_path), exist_ok=True)
     with open(json_path, "w", encoding="utf-8") as f:
@@ -111,7 +111,7 @@ def test_v2_file_promotes_to_v4_on_load(tmp_path):
     appListStore.load(list_path)
 
     data = _read_json(json_path)
-    assert data["version"] == 4
+    assert data["version"] == 7
     # 저장된 항목에 scope 필드 + tabBeepIdx 채워짐
     assert data["items"][0]["scope"] == SCOPE_WINDOW
     assert isinstance(data["items"][0]["tabBeepIdx"], int)

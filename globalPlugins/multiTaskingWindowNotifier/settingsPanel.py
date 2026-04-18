@@ -118,21 +118,6 @@ class MultiTaskingSettingsPanel(SettingsPanel):
             initial=_clamp(conf["maxItems"], MAX_ITEMS_MIN, MAX_ITEMS),
         )
 
-        # Translators: 비프음 재생 범위 확장 체크박스의 짧은 라벨.
-        self.enableAllCheck = sHelper.addItem(
-            wx.CheckBox(self, label=_("모든 포커스 전환에서 비프음 재생"))
-        )
-        self.enableAllCheck.SetValue(bool(conf["enableAllWindows"]))
-
-        # Translators: 위 체크박스 아래의 보조 설명.
-        enableAllHelp = wx.StaticText(
-            self,
-            label=_(
-                "이 옵션을 끄면 Alt+Tab으로 창을 고르는 화면에서만 비프음이 재생됩니다."
-            ),
-        )
-        sHelper.addItem(enableAllHelp)
-
         # Translators: 진단 로그 체크박스 라벨. 평상시엔 끄고, 문제 추적 시에만 사용.
         self.debugLoggingCheck = sHelper.addItem(
             wx.CheckBox(self, label=_("진단 로그 기록 (문제 추적용)"))
@@ -165,7 +150,6 @@ class MultiTaskingSettingsPanel(SettingsPanel):
         conf["beepVolumeLeft"] = volume_left
         conf["beepVolumeRight"] = volume_right
         conf["maxItems"] = max_items
-        conf["enableAllWindows"] = self.enableAllCheck.IsChecked()
         conf["debugLogging"] = self.debugLoggingCheck.IsChecked()
 
         # 시각 피드백 없는 스크린리더 사용자가 "왜 비프가 안 들리지?"에 빠지지 않도록

@@ -14,12 +14,11 @@ import api
 import ui
 import gui
 import speech
-import controlTypes
 import globalPluginHandler
 from logHandler import log
 from scriptHandler import script
 
-from .constants import ADDON_NAME, MAX_ITEMS, SCOPE_APP, SCOPE_WINDOW
+from .constants import ADDON_NAME, ALT_TAB_OVERLAY_WCN, MAX_ITEMS, SCOPE_APP, SCOPE_WINDOW
 from .appIdentity import getAppId, makeKey, makeAppKey, normalize_title, splitKey
 from . import appListStore
 from . import settings
@@ -46,11 +45,6 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
     _FLUSH_INTERVAL_SEC = 30
     _FLUSH_EVERY_N = 10
 
-    # 매칭 중복 억제 윈도우(초). 같은 탭 안에서 자식 컨트롤(예: 메모장 RichEditD2DPT)
-    # 로 gainFocus가 다중 발동해도 매칭 1회만. 너무 길면 의도적 빠른 재진입을 놓치고,
-    # 너무 짧으면 중복 비프가 들리므로 0.3s로 시작.
-    _MATCH_DEDUP_SEC = 0.3
-
     def __init__(self):
         super().__init__()
         # 설정 스키마 등록 + 설정 대화상자 패널 등록은 하나의 원자적 묶음으로 처리.
@@ -75,7 +69,7 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
         try:
             tabClasses.load(self.tabClassesFile)
         except Exception:
-            log.exception("mtwn: tabClasses load failed — editor/overlay branches disabled")
+            log.exception("mtwn: tabClasses load failed — overlay branch disabled")
         # scope=window 매칭용 사전: 복합키(appId|title)와 title-only 역매핑 모두 보유.
         # title-only 역매핑은 Alt+Tab 오버레이 케이스에서 obj의 appId가 explorer 등으로
         # 찍혀 신형 키 매칭이 깨질 때 fallback으로 쓰인다.
@@ -86,9 +80,12 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
         # 전환 카운트 디바운스 저장 상태
         self._lastFlushAt = time.monotonic()
         self._switchesSinceFlush = 0
-        # 매칭 중복 억제 상태
-        self._last_matched_key = None
-        self._last_matched_ts = 0.0
+        # 시그니처 기반 dedup — (appId, title, tab_sig)가 연속으로 같으면 skip.
+        # 확정 탭 전환은 title 또는 tab_sig(hwnd)가 바뀌므로 자연 통과하고,
+        # 같은 탭 자식 컨트롤 재진입 같은 이벤트 중복 폭주만 흡수한다.
+        # 시간 기반 가드는 쓰지 않는다 — "같은 제목 다른 탭"을 key만 보고 잘라내는
+        # 부작용(메모장 '제목 없음' 여러 개, 빠른 탭 왕복)이 드러나 제거했다.
+        self._last_event_sig = None
 
         # 손상된 app.json을 만났을 때 한 번만 사용자에게 안내.
         # ui.delayedMessage는 부팅 시 UI 변화에 묻히지 않도록 NVDA가 제공하는
@@ -209,22 +206,22 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
             tab_idx = 0
         return app_idx, tab_idx
 
-    def _match_and_beep(self, appId, title):
-        """공통 매칭 루틴. event_gainFocus가 매칭 소스를 결정한 뒤 호출.
+    def _match_and_beep(self, appId, title, tab_sig=0):
+        """공통 매칭 루틴. 이벤트 훅(event_gainFocus / event_nameChange)이
+        매칭 소스를 결정한 뒤 호출.
 
         매칭 우선순위:
             1. windowLookup 정확 매치 (key=appId|title) → 창 비프
             2. windowLookup title-only 역매핑 → 창 비프 (Alt+Tab 오버레이 호환)
             3. appLookup (appId) → 앱 비프
             4. 미스 → no-op
+
+        Args:
+            tab_sig: 탭/창 구분용 이벤트 식별자(보통 obj.windowHandle). 시그니처
+                dedup sig에 포함되어 같은 (appId, title)이라도 다른 탭이면 통과
+                시킨다. 0은 hwnd 미확보 상태 — 탭 구분 없는 기존 동작과 동치.
         """
         key = makeKey(appId, title)
-
-        # 중복 매칭 가드
-        now = time.monotonic()
-        if (key == self._last_matched_key
-                and now - self._last_matched_ts < self._MATCH_DEDUP_SEC):
-            return
 
         matched_key = None
         scope = None
@@ -240,8 +237,20 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
         if matched_key is None:
             return
 
-        self._last_matched_key = key
-        self._last_matched_ts = now
+        # 시그니처 dedup: (appId, title, tab_sig) 동일이면 skip.
+        # tab_sig(hwnd)는 호출부에서 분기별로 추출. 같은 탭 자식 컨트롤 재진입은
+        # hwnd 동일 → skip. Ctrl+Tab으로 다른 탭이 되면 hwnd 달라 통과. 시간 개념
+        # 없이 "직전 이벤트와 완전 동일한가"만 보기 때문에 빠른 탭 왕복(A→B→A)도
+        # 중간 B에서 sig가 갱신되어 복귀한 A가 정상 통과한다. 단 중간 B에 대한
+        # 이벤트 자체가 누락되면(A→A만 두 번) 두 번째 A가 여기서 조용히 skip되어
+        # 사용자 관점엔 "비프 누락"으로 보인다. debugLogging 켰을 때 이 경로도
+        # 기록해서 "왜 안 울렸는지" 실측 가능하게 한다.
+        event_sig = (appId, title, tab_sig)
+        if event_sig == self._last_event_sig:
+            if settings.get("debugLogging"):
+                log.info(f"mtwn: DBG sig_guard skip sig={event_sig!r}")
+            return
+        self._last_event_sig = event_sig
 
         app_idx, tab_idx = self._resolve_beep_pair(matched_key, scope, appId)
         play_beep(
@@ -333,40 +342,6 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
             )
             return
         self._rebuild_lookup()
-
-        # editor classname 자동 학습: scope=window 등록이 성공했고, 실제 focus가
-        # foreground 최상위와 다른 자식 컨트롤(예: 메모장의 RichEditD2DPT)이라면
-        # 그 wcn을 tabClasses에 추가. 이후 Ctrl+Tab 전환 시 event_gainFocus가
-        # 바로 editor 분기를 탄다. scope=app은 탭 의미 없어 스킵.
-        # 학습 실패는 등록 자체를 막지 않음 — best-effort, 예외는 로그만.
-        #
-        # wx.CallAfter로 한 틱 미뤄 실행하는 이유: _do_add 자체가 SingleChoiceDialog
-        # 모달 종료 직후 동기 실행되어 focus가 아직 다이얼로그/mainFrame에 있을 수
-        # 있다. NVDA focus 이벤트가 큐 흘러간 뒤(=다음 wx 이벤트 루프 틱) `api.
-        # getFocusObject()`가 실제 대상 창의 자식 컨트롤을 가리킨다.
-        #
-        # 그래도 focus가 다이얼로그 내부에 남아 있는 경우가 있어(실측에서 wx
-        # SingleChoiceDialog의 ListBox가 반복 학습되는 버그 확인) role 게이트를
-        # 추가한다. 에디터 자식 컨트롤은 EDITABLETEXT(Scintilla) 또는
-        # DOCUMENT(RichEditD2DPT) 역할을 가지며, ListBox/Pane 같은 다이얼로그
-        # 위젯은 이 두 role에 속하지 않아 필터링된다.
-        if scope == SCOPE_WINDOW:
-            def _learn_editor_wcn():
-                try:
-                    focus = api.getFocusObject()
-                    fg_obj = api.getForegroundObject()
-                    if focus is None or fg_obj is None:
-                        return
-                    focus_wcn = getattr(focus, "windowClassName", "") or ""
-                    fg_wcn = getattr(fg_obj, "windowClassName", "") or ""
-                    focus_role = getattr(focus, "role", None)
-                    editor_roles = (controlTypes.Role.EDITABLETEXT, controlTypes.Role.DOCUMENT)
-                    if (focus_wcn and focus_wcn != fg_wcn
-                            and focus_role in editor_roles):
-                        tabClasses.learn_editor(appId, focus_wcn)
-                except Exception:
-                    log.exception("mtwn: tabClasses learn_editor hook failed")
-            wx.CallAfter(_learn_editor_wcn)
 
         if scope == SCOPE_APP:
             ui.message(f"앱 전체로 추가했어요: {appId}", speechPriority=speech.Spri.NEXT)
@@ -515,45 +490,58 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
             log.exception("mtwn: debug log failed")
 
     def _determine_match_source(self, obj, wcn, appId, fg, fg_wcn):
-        """event_gainFocus 4분기 판정. 매칭 대상이면 raw_title(str), 아니면 None.
+        """event_gainFocus 3분기 판정.
 
-        우선순위: alt_tab > app_overlay > tab_editor > enable_all.
-        in_app_overlay(fg.wcn 기반)와 in_tab_editor(obj.wcn 기반)가 같은 이벤트에서
-        둘 다 True가 될 수 있어도 아래 `if in_alt_tab or in_app_overlay: src = obj`로
-        overlay가 editor를 이긴다. 비프는 어느 쪽이든 1회이며 dedup 가드로 중복 억제.
-          1) Alt+Tab 오버레이 — obj.wcn이 Windows.UI.Input.InputSite.WindowClass.
-             obj 자신이 "선택 후보 창"의 name을 들고 있다.
+        매칭 대상이면 (raw_title, tab_sig), 아니면 None.
+
+        대부분의 Ctrl+Tab 확정 전환은 `event_nameChange`가 foreground title
+        변경으로 감지한다. 여기서는 nameChange가 못 잡거나 의미가 없는 경로만
+        다룬다.
+
+          1) Alt+Tab 오버레이 — obj.wcn이 `ALT_TAB_OVERLAY_WCN`. obj 자신이
+             "선택 후보 창"의 name을 들고 있음.
           2) 앱별 오버레이 (예: Notepad++ MRU) — fgWcn이 appId의 overlay
-             리스트에 등록된 상위창 wcn이면 overlay 모드. obj는 리스트 항목.
-          3) 에디터 자식 컨트롤 (예: 메모장 RichEditD2DPT) — obj.wcn이 appId의
-             editor 리스트에 있으면 editor 모드. foreground.name이 탭 제목.
-          4) enableAllWindows — 1~3 해당 없어도 전역 on일 때 foreground name.
+             목록에 있음. obj가 리스트 항목.
+          3) 에디터 자식 컨트롤 — `is_editor_class(appId, wcn) AND wcn != fg_wcn`.
+             메모장 "제목 없음" 여러 탭처럼 title이 안 바뀌어 nameChange로는
+             구분 불가한 앱 전용. `wcn != fg_wcn` 게이트가 자식==최상위 wcn인
+             앱(Firefox 계열)의 과도 매칭을 자동 차단한다. 이 분기는 fg.name을
+             탭 제목으로, obj.windowHandle(자식 hwnd, 탭별 고유)을 tab_sig로
+             쓴다.
         """
-        in_alt_tab     = wcn == "Windows.UI.Input.InputSite.WindowClass"
+        in_alt_tab     = wcn == ALT_TAB_OVERLAY_WCN
         in_app_overlay = tabClasses.is_overlay_class(appId, fg_wcn)
-        in_tab_editor  = tabClasses.is_editor_class(appId, wcn)
-        enable_all = settings.get("enableAllWindows")
+        in_tab_editor  = (tabClasses.is_editor_class(appId, wcn)
+                          and wcn != fg_wcn)
 
-        if not (enable_all or in_alt_tab or in_app_overlay or in_tab_editor):
+        if not (in_alt_tab or in_app_overlay or in_tab_editor):
             return None
 
-        # 매칭 소스 결정:
-        #   - alt_tab/overlay: obj.name이 탭 제목 (Alt+Tab 후보 창, MRU 리스트 항목)
-        #   - editor/enable_all: foreground.name이 활성 탭 제목. fg None이면 obj 폴백.
-        if in_alt_tab or in_app_overlay:
-            src = obj
-        else:
+        # 매칭 소스: alt_tab/overlay는 obj.name(후보·리스트 항목 자체),
+        # editor는 fg.name(= 활성 탭 제목 포함한 창 title bar).
+        if in_tab_editor:
             src = fg or obj
+        else:
+            src = obj
 
         raw_title = (getattr(src, "name", "") or "").strip()
         if not raw_title:
             return None
-        return raw_title
+
+        # tab_sig: editor 분기는 **항상 obj(자식)**의 hwnd. fg.windowHandle로 쓰면
+        # 메모장 같은 "제목 없음" 여러 탭이 같은 최상위 hwnd를 공유해 구분 불가.
+        # 나머지 분기는 title 소스와 같은 obj의 hwnd.
+        sig_obj = obj if in_tab_editor else src
+        try:
+            tab_sig = int(getattr(sig_obj, "windowHandle", 0) or 0)
+        except Exception:
+            tab_sig = 0
+        return raw_title, tab_sig
 
     def event_gainFocus(self, obj, nextHandler):
-        # 창 전환 시 파일 I/O 없음. 메모리 목록만 참조.
-        # event_gainFocus는 모든 포커스 전환마다 호출되므로, 본 애드온 예외가
+        # event_gainFocus는 모든 포커스 전환마다 호출되므로 본 애드온 예외가
         # NVDA 이벤트 체인을 끊지 않도록 try/except + finally로 nextHandler() 보장.
+        # 여기서는 오버레이(Alt+Tab / 앱별 MRU) 탐색만 처리한다.
         try:
             if settings.get("debugLogging"):
                 self._log_focus_diag(obj)
@@ -566,18 +554,66 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
             fg = api.getForegroundObject()
             fg_wcn = getattr(fg, "windowClassName", "") if fg is not None else ""
 
-            raw_title = self._determine_match_source(obj, wcn, appId, fg, fg_wcn)
-            if not raw_title:
+            match_source = self._determine_match_source(obj, wcn, appId, fg, fg_wcn)
+            if match_source is None:
                 return
-            # title 정규화: 꼬리 " - 앱명" 한 덩이 제거로 Alt+Tab obj.name,
-            # editor fg.name, overlay obj.name을 같은 형태로 통일 → 등록 데이터와
-            # 정확 일치. appId는 scope=window 복합키의 1등 요소라 title에 앱명을
-            # 중복 저장하지 않는다.
+            raw_title, tab_sig = match_source
             title = normalize_title(raw_title)
             if not title:
                 return
-            self._match_and_beep(appId, title)
+            self._match_and_beep(appId, title, tab_sig=tab_sig)
         except Exception:
             log.exception("mtwn: event_gainFocus failed")
+        finally:
+            nextHandler()
+
+    def event_nameChange(self, obj, nextHandler):
+        """탭 확정 전환 감지. foreground 창 자체의 name 변경만 매칭 입력으로 사용.
+
+        Ctrl+Tab / Ctrl+Shift+Tab 등으로 탭이 확정 전환되면 대부분 앱에서 최상위
+        창의 title bar가 바뀐다. Firefox / Notepad++가 여기에 해당. 메모장처럼
+        "제목 없음" 여러 탭을 동시에 쓰면 title이 안 바뀌어 이 훅으로는 구분
+        불가 — 그 케이스는 `event_gainFocus`의 editor 분기가 자식 hwnd로 구분.
+
+        자식 요소(웹 DOM, 동적 레이블 등)의 name 변경은 `obj.name != fg.name`
+        비교로 걸러진다. NVDA는 같은 창의 자식 객체에도 nameChange를 쏘지만
+        fg.name과는 보통 다른 값을 갖기 때문.
+        """
+        try:
+            if obj is None:
+                return
+            fg = api.getForegroundObject()
+            if fg is None:
+                return
+            fg_name = (getattr(fg, "name", "") or "").strip()
+            obj_name = (getattr(obj, "name", "") or "").strip()
+            debug = settings.get("debugLogging")
+            if not obj_name or obj_name != fg_name:
+                if debug:
+                    log.info(
+                        f"mtwn: DBG nameChange skip obj_name={obj_name!r} "
+                        f"fg_name={fg_name!r}"
+                    )
+                return
+            appId = getAppId(obj)
+            title = normalize_title(obj_name)
+            if not title:
+                if debug:
+                    log.info(
+                        f"mtwn: DBG nameChange skip-normalize obj_name={obj_name!r}"
+                    )
+                return
+            try:
+                tab_sig = int(getattr(obj, "windowHandle", 0) or 0)
+            except Exception:
+                tab_sig = 0
+            if debug:
+                log.info(
+                    f"mtwn: DBG nameChange appId={appId!r} title={title!r} "
+                    f"tab_sig={tab_sig}"
+                )
+            self._match_and_beep(appId, title, tab_sig=tab_sig)
+        except Exception:
+            log.exception("mtwn: event_nameChange failed")
         finally:
             nextHandler()
