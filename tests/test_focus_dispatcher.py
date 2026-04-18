@@ -215,6 +215,24 @@ def test_empty_raw_title_is_skipped(captured_match, mock_api, monkeypatch, debug
     assert calls == []
 
 
+def test_debug_logging_path_is_invoked(captured_match, mock_api, monkeypatch, tab_classes_noop):
+    """debugLogging=True면 _log_focus_diag가 호출돼 NVDA 로그에 진단 정보 기록.
+
+    분기 로직을 건드리지 않고 조용히 로그만 남기는지 확인 — 로그 자체는
+    log.info로 캡처되지만 여기선 예외 없이 통과함만 검증.
+    """
+    plugin, calls = captured_match
+    monkeypatch.setattr(focusDispatcher.settings, "get", lambda key: key == "debugLogging")
+    obj = _make_obj(wcn="Button", name="Some Button", hwnd=0xD001, appName="explorer")
+    fg = _make_obj(wcn="CabinetWClass", name="탐색기", hwnd=0xD000, appName="explorer")
+    mock_api(fg)
+
+    # 미매칭이라 calls는 비지만 _log_focus_diag가 예외 없이 실행돼야 한다.
+    focusDispatcher.dispatch(plugin, obj)
+
+    assert calls == []
+
+
 def test_whitespace_only_name_is_skipped(captured_match, mock_api, monkeypatch, debug_off):
     """raw title이 공백만이면 strip 후 빈 문자열 → 매칭 위임 전 skip."""
     plugin, calls = captured_match

@@ -16,3 +16,8 @@ dev = [
 testpaths = ["tests"]
 pythonpath = ["."]
 addopts = "-ra --strict-markers"
+
+[dependency-groups]
+dev = [
+    "pytest-cov>=7.1.0",
+]
