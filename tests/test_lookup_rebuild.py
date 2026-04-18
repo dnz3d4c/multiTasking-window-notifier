@@ -79,16 +79,22 @@ def test_title_collision_keeps_first_registered(plugin):
 
 
 def test_alt_tab_overlay_triggers_beep_via_title_fallback(plugin, monkeypatch):
-    """실측 재현: Alt+Tab 오버레이(appId='explorer')에서 전달된 name이 복합키
-    entry의 title과 일치하면, title 역매핑 덕에 match가 성공하고 비프가 발사돼야 한다.
+    """실측 재현: Alt+Tab 오버레이(appId='explorer')에서 obj가 들고 온 raw title
+    (" - 메모장" 서픽스 포함)이 normalize_title을 거쳐 복합키 entry의 정규화된
+    title과 일치하면, title 역매핑 덕에 match 성공 + 비프 발사.
 
     Phase 2 회귀 당시엔 여기서 matched=None이 되어 조용히 빠져나갔다.
+    Phase B(normalize_title 도입) 이후에는 appList의 title이 정규화 형태
+    ("제목 없음")로 저장되며, Alt+Tab obj.name의 raw 서픽스는 event_gainFocus
+    의 normalize_title 적용으로 흡수된다.
     """
-    plugin.appList = ["notepad|제목 없음 - 메모장"]
+    # 정규화 마이그레이션 후 실측 디스크 상태를 모사 (꼬리 " - 메모장" 없음).
+    plugin.appList = ["notepad|제목 없음"]
     plugin._rebuild_lookup()
 
     focus = MagicMock()
     focus.windowClassName = "Windows.UI.Input.InputSite.WindowClass"
+    # Alt+Tab obj는 윈도우 타이틀바의 raw 문자열을 그대로 들고 온다.
     focus.name = "제목 없음 - 메모장"
     focus.appModule = MagicMock()
     # Alt+Tab 오버레이의 전형적 appName. 대상 앱(notepad)과 다르다.

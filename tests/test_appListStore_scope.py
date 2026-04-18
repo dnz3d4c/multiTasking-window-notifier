@@ -48,7 +48,9 @@ def test_app_scope_via_scopes_param(tmp_path):
 
 def test_mixed_scope_round_trip(tmp_path):
     path = _list_path(tmp_path)
-    keys = ["chrome", "chrome|YouTube", "notepad|*룰루루 - 메모장"]
+    # title은 normalize_title 영향 받지 않는 형태 사용 — normalize 마이그레이션
+    # 동작은 별도 테스트 소관. 여기선 mixed scope의 순수 round trip만 검증.
+    keys = ["chrome", "chrome|YouTube", "notepad|룰루루"]
     scopes = {"chrome": SCOPE_APP}
     appListStore.save(path, keys, scopes=scopes)
 
@@ -57,7 +59,7 @@ def test_mixed_scope_round_trip(tmp_path):
     assert appListStore.load(path) == keys
     assert appListStore.get_meta(path, "chrome")["scope"] == SCOPE_APP
     assert appListStore.get_meta(path, "chrome|YouTube")["scope"] == SCOPE_WINDOW
-    assert appListStore.get_meta(path, "notepad|*룰루루 - 메모장")["scope"] == SCOPE_WINDOW
+    assert appListStore.get_meta(path, "notepad|룰루루")["scope"] == SCOPE_WINDOW
 
 
 def test_v2_file_loads_with_window_scope_injected(tmp_path):

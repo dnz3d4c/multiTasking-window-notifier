@@ -32,6 +32,9 @@ def _mock_module(name: str) -> types.ModuleType:
 
 
 # 단순 모킹 대상
+# controlTypes: __init__.py 학습 훅의 role 게이트에서 `controlTypes.Role.EDITABLETEXT`/
+#   `controlTypes.Role.DOCUMENT`만 참조한다. MagicMock이 속성 접근을 자동 캐시하므로
+#   같은 enum이 같은 객체로 돌아와 identity 비교 + in 연산 둘 다 안전.
 for _name in [
     "api",
     "ui",
@@ -41,6 +44,7 @@ for _name in [
     "addonHandler",
     "scriptHandler",
     "config",
+    "controlTypes",
 ]:
     _mock_module(_name)
 
