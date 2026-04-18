@@ -27,6 +27,54 @@ except Exception:
         return s
 
 
+# ---- wx 없이 단위 테스트 가능한 순수 함수(Phase 4.2) ----
+
+
+def format_display_text(entry: str, scope: str) -> str:
+    """ListBox 1줄 표시 텍스트. scope별 프리픽스 + 가독성 좋은 appId|title 포맷.
+
+    scope=app은 entry 자체가 appId. scope=window는 splitKey로 분해. appId가
+    비어 있는 구형 entry는 "앱 미지정" 라벨로 폴백 — wx 의존성 없이 단위
+    테스트 가능하도록 module-level로 추출했다.
+    """
+    if scope == SCOPE_APP:
+        return f"[앱] {entry}"
+    appId, title = splitKey(entry)
+    appLabel = appId if appId else "앱 미지정"
+    return f"[창] {appLabel} | {title}"
+
+
+def format_count_text(n: int) -> str:
+    """카운트 라벨 텍스트. 숫자만 있으면 확정 — wx 독립."""
+    return _("총 %d개") % n
+
+
+def compute_cascade_targets(selected, entries, get_scope):
+    """앱 entry 선택 시 함께 삭제 후보가 되는 window entry 목록 계산.
+
+    선택된 항목 중 scope=app인 것이 있으면, `_entries` 전체에서 해당 appId에
+    속하는 window entry를 찾아 반환. 이미 selected에 들어있는 entry는 제외.
+    `_delete_selected`의 cascade 판정 로직을 순수 함수로 분리했다.
+
+    Args:
+        selected: 사용자가 선택한 entry 리스트.
+        entries: 현재 표시 중인 전체 entry 리스트(다이얼로그의 `_entries`).
+        get_scope: callable(entry) -> scope. 메타 조회 콜백.
+
+    Returns:
+        list: cascade 대상 window entry. 앱 entry가 선택되지 않았으면 빈 리스트.
+    """
+    app_entries = [e for e in selected if get_scope(e) == SCOPE_APP]
+    if not app_entries:
+        return []
+    return [
+        e for e in entries
+        if e not in selected
+        and get_scope(e) == SCOPE_WINDOW
+        and splitKey(e)[0] in app_entries
+    ]
+
+
 class AppListDialog(wx.Dialog):
     """등록된 창/앱 목록 다이얼로그.
 
@@ -93,15 +141,10 @@ class AppListDialog(wx.Dialog):
         self.EscapeId = wx.ID_OK
 
     def _display_text(self, entry: str) -> str:
-        scope = self._get_scope(entry)
-        if scope == SCOPE_APP:
-            return f"[앱] {entry}"
-        appId, title = splitKey(entry)
-        appLabel = appId if appId else "앱 미지정"
-        return f"[창] {appLabel} | {title}"
+        return format_display_text(entry, self._get_scope(entry))
 
     def _count_text(self) -> str:
-        return _("총 %d개") % len(self._entries)
+        return format_count_text(len(self._entries))
 
     def _selected_entries(self):
         """현재 선택된 entry 리스트 (원본 키)."""
@@ -123,31 +166,26 @@ class AppListDialog(wx.Dialog):
             wx.Bell()
             return
 
-        # 앱 entry가 포함된 경우 일괄 삭제 확인
-        app_entries = [e for e in selected if self._get_scope(e) == SCOPE_APP]
+        # 앱 entry가 포함된 경우 일괄 삭제 확인 (cascade 계산은 순수 함수 위임)
         cascade_targets = []  # 함께 삭제할 동일 appId 창 entry
-        if app_entries:
-            same_app_windows = [
-                e for e in self._entries
-                if e not in selected
-                and self._get_scope(e) == SCOPE_WINDOW
-                and splitKey(e)[0] in app_entries
-            ]
-            if same_app_windows:
-                msg = _(
-                    "선택한 앱 항목과 같은 앱의 창 항목 %d개가 함께 등록되어 있어요.\n"
-                    "창 항목들도 같이 지울까요?"
-                ) % len(same_app_windows)
-                resp = wx.MessageBox(
-                    msg,
-                    _("앱 항목 삭제 확인"),
-                    wx.YES_NO | wx.CANCEL | wx.ICON_QUESTION,
-                    self,
-                )
-                if resp == wx.CANCEL:
-                    return
-                if resp == wx.YES:
-                    cascade_targets = same_app_windows
+        same_app_windows = compute_cascade_targets(
+            selected, self._entries, self._get_scope
+        )
+        if same_app_windows:
+            msg = _(
+                "선택한 앱 항목과 같은 앱의 창 항목 %d개가 함께 등록되어 있어요.\n"
+                "창 항목들도 같이 지울까요?"
+            ) % len(same_app_windows)
+            resp = wx.MessageBox(
+                msg,
+                _("앱 항목 삭제 확인"),
+                wx.YES_NO | wx.CANCEL | wx.ICON_QUESTION,
+                self,
+            )
+            if resp == wx.CANCEL:
+                return
+            if resp == wx.YES:
+                cascade_targets = same_app_windows
 
         targets = list(dict.fromkeys(selected + cascade_targets))  # 순서 보존 + 중복 제거
 
