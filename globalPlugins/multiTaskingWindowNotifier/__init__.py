@@ -17,7 +17,7 @@ import globalPluginHandler
 from logHandler import log
 from scriptHandler import script
 
-from .constants import ADDON_NAME, ALT_TAB_OVERLAY_WCN, MAX_ITEMS, SCOPE_APP, SCOPE_WINDOW
+from .constants import ADDON_NAME, MAX_ITEMS, SCOPE_APP, SCOPE_WINDOW
 from .appIdentity import getAppId, makeAppKey, normalize_title
 from . import appListStore
 from . import settings
@@ -28,6 +28,8 @@ from .settingsPanel import MultiTaskingSettingsPanel
 from .switchFlusher import FlushScheduler
 from .lookupIndex import LookupIndex
 from .matcher import Matcher
+from . import focusDispatcher
+from . import nameChangeWatcher
 
 # 번역 초기화(선택)
 try:
@@ -353,107 +355,14 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 
     # -------- 이벤트 훅 --------
 
-    def _log_focus_diag(self, obj):
-        """debugLogging=True 진단 로그. 본 로직 침범 방지를 위해 전용 try/except로 격리.
-
-        Ctrl+Tab 등에서 비프가 안 나는 원인을 실측으로 특정하기 위한 일회성 기록.
-        NVDA 로그에 한 줄/이벤트로 남는다. settings.get("debugLogging")이 True일
-        때만 event_gainFocus가 호출하므로 off 상태에선 함수 호출 자체 없음.
-        """
-        try:
-            wcn = getattr(obj, "windowClassName", "") if obj is not None else ""
-            obj_name = (getattr(obj, "name", "") or "") if obj is not None else ""
-            role = getattr(obj, "role", "") if obj is not None else ""
-            parent = getattr(obj, "parent", None) if obj is not None else None
-            parent_wcn = getattr(parent, "windowClassName", "") if parent is not None else ""
-            fg = api.getForegroundObject()
-            fg_wcn = getattr(fg, "windowClassName", "") if fg is not None else ""
-            fg_name = (getattr(fg, "name", "") or "") if fg is not None else ""
-            try:
-                obj_app = getAppId(obj) if obj is not None else ""
-            except Exception:
-                obj_app = "<err>"
-            log.info(
-                f"mtwn: DBG gF wcn={wcn!r} name={obj_name!r} role={role!r} "
-                f"parentWcn={parent_wcn!r} fgWcn={fg_wcn!r} fgName={fg_name!r} "
-                f"appId={obj_app!r}"
-            )
-        except Exception:
-            log.exception("mtwn: debug log failed")
-
-    def _determine_match_source(self, obj, wcn, appId, fg, fg_wcn):
-        """event_gainFocus 3분기 판정.
-
-        매칭 대상이면 (raw_title, tab_sig), 아니면 None.
-
-        대부분의 Ctrl+Tab 확정 전환은 `event_nameChange`가 foreground title
-        변경으로 감지한다. 여기서는 nameChange가 못 잡거나 의미가 없는 경로만
-        다룬다.
-
-          1) Alt+Tab 오버레이 — obj.wcn이 `ALT_TAB_OVERLAY_WCN`. obj 자신이
-             "선택 후보 창"의 name을 들고 있음.
-          2) 앱별 오버레이 (예: Notepad++ MRU) — fgWcn이 appId의 overlay
-             목록에 있음. obj가 리스트 항목.
-          3) 에디터 자식 컨트롤 — `is_editor_class(appId, wcn) AND wcn != fg_wcn`.
-             메모장 "제목 없음" 여러 탭처럼 title이 안 바뀌어 nameChange로는
-             구분 불가한 앱 전용. `wcn != fg_wcn` 게이트가 자식==최상위 wcn인
-             앱(Firefox 계열)의 과도 매칭을 자동 차단한다. 이 분기는 fg.name을
-             탭 제목으로, obj.windowHandle(자식 hwnd, 탭별 고유)을 tab_sig로
-             쓴다.
-        """
-        in_alt_tab     = wcn == ALT_TAB_OVERLAY_WCN
-        in_app_overlay = tabClasses.is_overlay_class(appId, fg_wcn)
-        in_tab_editor  = (tabClasses.is_editor_class(appId, wcn)
-                          and wcn != fg_wcn)
-
-        if not (in_alt_tab or in_app_overlay or in_tab_editor):
-            return None
-
-        # 매칭 소스: alt_tab/overlay는 obj.name(후보·리스트 항목 자체),
-        # editor는 fg.name(= 활성 탭 제목 포함한 창 title bar).
-        if in_tab_editor:
-            src = fg or obj
-        else:
-            src = obj
-
-        raw_title = (getattr(src, "name", "") or "").strip()
-        if not raw_title:
-            return None
-
-        # tab_sig: editor 분기는 **항상 obj(자식)**의 hwnd. fg.windowHandle로 쓰면
-        # 메모장 같은 "제목 없음" 여러 탭이 같은 최상위 hwnd를 공유해 구분 불가.
-        # 나머지 분기는 title 소스와 같은 obj의 hwnd.
-        sig_obj = obj if in_tab_editor else src
-        try:
-            tab_sig = int(getattr(sig_obj, "windowHandle", 0) or 0)
-        except Exception:
-            tab_sig = 0
-        return raw_title, tab_sig
-
     def event_gainFocus(self, obj, nextHandler):
-        # event_gainFocus는 모든 포커스 전환마다 호출되므로 본 애드온 예외가
-        # NVDA 이벤트 체인을 끊지 않도록 try/except + finally로 nextHandler() 보장.
-        # 여기서는 오버레이(Alt+Tab / 앱별 MRU) 탐색만 처리한다.
+        """모든 포커스 전환에서 호출. 3분기 매칭은 focusDispatcher에 위임.
+
+        try/except + finally로 nextHandler() 보장은 여기 유지 — 애드온 예외가
+        NVDA 이벤트 체인을 끊지 않도록 진입점 레이어에서 흡수.
+        """
         try:
-            if settings.get("debugLogging"):
-                self._log_focus_diag(obj)
-
-            if obj is None:
-                return
-
-            wcn = getattr(obj, "windowClassName", "")
-            appId = getAppId(obj)
-            fg = api.getForegroundObject()
-            fg_wcn = getattr(fg, "windowClassName", "") if fg is not None else ""
-
-            match_source = self._determine_match_source(obj, wcn, appId, fg, fg_wcn)
-            if match_source is None:
-                return
-            raw_title, tab_sig = match_source
-            title = normalize_title(raw_title)
-            if not title:
-                return
-            self._match_and_beep(appId, title, tab_sig=tab_sig)
+            focusDispatcher.dispatch(self, obj)
         except Exception:
             log.exception("mtwn: event_gainFocus failed")
         finally:
