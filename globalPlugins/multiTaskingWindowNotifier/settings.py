@@ -18,16 +18,19 @@ from .constants import ADDON_NAME, MAX_ITEMS
 
 # NVDA config.conf 스키마.
 # 문자열 포맷: "<type>(default=<v>, min=<v>, max=<v>)"
-# - beepDuration      : 비프음 지속 시간(ms). 기존 하드코딩 값 50을 기본값으로.
+# - beepDuration      : 비프음 지속 시간(ms). v4부터 2음 재생이 기본이므로 각 음 50ms.
+# - beepGapMs         : 앱 비프 a와 탭 비프 b 사이 간격(ms). v4 신설.
 # - beepVolumeLeft    : 좌측 볼륨 (0~100)
 # - beepVolumeRight   : 우측 볼륨 (0~100)
-# - maxItems          : 사용자 운영 상한. 실제 상한은 MAX_ITEMS(=BEEP_TABLE 길이)와 min() 결합
+# - maxItems          : 사용자 운영 상한. 실제 상한은 MAX_ITEMS와 min() 결합.
+#                      v4부터 MAX_ITEMS는 BEEP_TABLE 크기와 디커플(128).
 # - enableAllWindows  : 모든 포커스 전환에서 비프할지 여부.
 #                      기본 False → Alt+Tab 오버레이(Windows.UI.Input.InputSite.WindowClass)에서만 동작.
 # - debugLogging      : event_gainFocus 진단 로그. Ctrl+Tab/오버레이 classname 추적용.
 #                      기본 False. 켜면 NVDA 로그(%APPDATA%\\nvda\\nvda.log)에 한 줄씩 기록.
 CONFSPEC = {
-    "beepDuration": "integer(default=100, min=20, max=500)",
+    "beepDuration": "integer(default=50, min=20, max=500)",
+    "beepGapMs": "integer(default=15, min=0, max=200)",
     "beepVolumeLeft": "integer(default=50, min=0, max=100)",
     "beepVolumeRight": "integer(default=50, min=0, max=100)",
     "maxItems": f"integer(default={MAX_ITEMS}, min=1, max={MAX_ITEMS})",

@@ -37,8 +37,9 @@ except Exception:
 
 
 # SpinCtrl의 min/max와 onSave의 clamp 양쪽에서 공용으로 쓰는 상수.
-# MAX_ITEMS(=BEEP_TABLE 길이)는 constants에서 import.
+# MAX_ITEMS는 constants에서 import. v4부터 BEEP_TABLE_SIZE와 디커플.
 DURATION_MIN, DURATION_MAX = 20, 500
+GAP_MIN, GAP_MAX = 0, 200
 VOLUME_MIN, VOLUME_MAX = 0, 100
 MAX_ITEMS_MIN = 1
 
@@ -64,6 +65,24 @@ class MultiTaskingSettingsPanel(SettingsPanel):
             min=DURATION_MIN, max=DURATION_MAX,
             initial=_clamp(conf["beepDuration"], DURATION_MIN, DURATION_MAX),
         )
+
+        # Translators: 앱 비프와 탭 비프 사이 간격 SpinCtrl 라벨. 단위는 밀리초.
+        self.gapSpin = sHelper.addLabeledControl(
+            _("탭 비프 간격 (밀리초):"),
+            wx.SpinCtrl,
+            min=GAP_MIN, max=GAP_MAX,
+            initial=_clamp(conf["beepGapMs"], GAP_MIN, GAP_MAX),
+        )
+
+        # Translators: 탭 비프 간격 SpinCtrl 아래의 도움말.
+        gapHelp = wx.StaticText(
+            self,
+            label=_(
+                "창으로 등록한 항목은 앱 비프음이 울린 뒤 이 간격만큼 쉬고 탭 비프음이 "
+                "이어서 울립니다. 0으로 두면 두 음이 거의 붙어 들립니다."
+            ),
+        )
+        sHelper.addItem(gapHelp)
 
         # Translators: 왼쪽 채널 볼륨 SpinCtrl 라벨. 값 0은 해당 채널만 무음.
         self.volumeLeftSpin = sHelper.addLabeledControl(
@@ -135,12 +154,14 @@ class MultiTaskingSettingsPanel(SettingsPanel):
         # 쓰기 시점에 명시적으로 clamp한다. configobj의 validate는 읽기 시점
         # 적용이라 쓰기에서는 자동 보호가 없다.
         duration = _clamp(self.durationSpin.GetValue(), DURATION_MIN, DURATION_MAX)
+        gap_ms = _clamp(self.gapSpin.GetValue(), GAP_MIN, GAP_MAX)
         volume_left = _clamp(self.volumeLeftSpin.GetValue(), VOLUME_MIN, VOLUME_MAX)
         volume_right = _clamp(self.volumeRightSpin.GetValue(), VOLUME_MIN, VOLUME_MAX)
         max_items = _clamp(self.maxItemsSpin.GetValue(), MAX_ITEMS_MIN, MAX_ITEMS)
 
         conf = config.conf[ADDON_NAME]
         conf["beepDuration"] = duration
+        conf["beepGapMs"] = gap_ms
         conf["beepVolumeLeft"] = volume_left
         conf["beepVolumeRight"] = volume_right
         conf["maxItems"] = max_items

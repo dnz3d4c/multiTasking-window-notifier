@@ -171,54 +171,43 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
             f"window_keys={len(self.windowLookup)} app_keys={len(self.appLookup)}"
         )
 
-    def _get_registration_order(self, key, appId):
-        """같은 appId를 가진 SCOPE_WINDOW 항목 중 key의 등록 순서(1부터).
+    def _resolve_beep_pair(self, matched_key, scope, appId):
+        """v4 (app_idx, tab_idx) 쌍 결정.
 
-        scope=app 항목은 카운트에 포함하지 않음 — 앱 entry는 "기준 주파수" 역할만
-        하고 비프 변주 순서(order)는 창 entry끼리만 셈한다. 같은 appId의 첫 번째
-        창 entry가 order=1, 두 번째가 2, ...
-        """
-        order = 0
-        for entry in self.appList:
-            if self._meta_for(entry) != SCOPE_WINDOW:
-                continue
-            entry_appId, _entry_title = splitKey(entry)
-            if entry_appId == appId:
-                order += 1
-                if entry == key:
-                    return order
-        return 1  # 기본값
+        Returns:
+            tuple: (app_idx, tab_idx_or_none).
+                - scope=app: (appBeepMap[real_appId], None). 단음 재생.
+                - scope=window: (appBeepMap[real_appId], entry.tabBeepIdx). 2음 재생.
 
-    def _resolve_beep_params(self, matched_key, scope, appId):
-        """비프 base_idx와 order 결정.
+        title 역매핑 케이스(Alt+Tab 오버레이에서 obj.appId='explorer'로 들어왔는데
+        정작 등록된 entry는 'notepad|Memo')에 대비해 호출 인자 `appId` 대신
+        matched_key에서 추출한 real_app_id로 appBeepMap을 조회한다.
 
-        - scope=app: base_idx=app entry의 idx, order=1 (반음 변주 없음)
-        - scope=window:
-            * 동일 appId의 app entry가 있으면 base_idx=app entry의 idx,
-              order=같은 appId 창 entry 등록 순서 (앱 기준음에서 반음씩 위로)
-            * app entry 없으면 base_idx=같은 appId 첫 창 entry idx,
-              order=등록 순서. 결과적으로 첫 창은 그 idx의 기본음.
+        appBeepMap이나 tabBeepIdx가 미설정인 드문 케이스는 0으로 폴백해 무음은
+        피한다(할당은 _ensure_beep_assignments가 보장하지만 race 방어).
         """
         if scope == SCOPE_APP:
-            base_idx = self.appLookup.get(matched_key, 0)
-            return base_idx, 1
-        # SCOPE_WINDOW
-        # app entry 있으면 그 idx를 기준음으로
-        app_idx = self.appLookup.get(appId)
-        if app_idx is not None:
-            base_idx = app_idx
+            real_app_id = matched_key
         else:
-            # 같은 appId의 첫 SCOPE_WINDOW entry idx
-            base_idx = self.windowLookup.get(matched_key, 0)
-            for entry_idx, entry in enumerate(self.appList):
-                if self._meta_for(entry) != SCOPE_WINDOW:
-                    continue
-                ea, _ = splitKey(entry)
-                if ea == appId:
-                    base_idx = entry_idx
-                    break
-        order = self._get_registration_order(matched_key, appId)
-        return base_idx, order
+            real_app_id, _ = splitKey(matched_key)
+        app_idx = appListStore.get_app_beep_idx(self.appListFile, real_app_id)
+        if app_idx is None:
+            # _ensure_beep_assignments가 모든 등록 appId에 할당하므로 정상 흐름에선
+            # miss가 뜨지 않는다. 뜬다면 캐시 정합성 버그 신호 → warning.
+            log.warning(
+                f"mtwn: appBeepMap miss appId={real_app_id!r} — falling back to 0"
+            )
+            app_idx = 0
+        if scope == SCOPE_APP:
+            return app_idx, None
+        # SCOPE_WINDOW
+        tab_idx = appListStore.get_tab_beep_idx(self.appListFile, matched_key)
+        if tab_idx is None:
+            log.warning(
+                f"mtwn: tabBeepIdx miss key={matched_key!r} — falling back to 0"
+            )
+            tab_idx = 0
+        return app_idx, tab_idx
 
     def _match_and_beep(self, appId, title):
         """공통 매칭 루틴. event_gainFocus가 매칭 소스를 결정한 뒤 호출.
@@ -254,10 +243,11 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
         self._last_matched_key = key
         self._last_matched_ts = now
 
-        base_idx, order = self._resolve_beep_params(matched_key, scope, appId)
+        app_idx, tab_idx = self._resolve_beep_pair(matched_key, scope, appId)
         play_beep(
-            base_idx, order, scope,
+            app_idx, tab_idx, scope,
             duration=settings.get("beepDuration"),
+            gap_ms=settings.get("beepGapMs"),
             left=settings.get("beepVolumeLeft"),
             right=settings.get("beepVolumeRight"),
         )

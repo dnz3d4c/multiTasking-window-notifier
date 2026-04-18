@@ -108,12 +108,12 @@ def test_alt_tab_overlay_triggers_beep_via_title_fallback(plugin, monkeypatch):
 
     called = []
 
-    def fake_beep(base_idx, order, scope, **kwargs):
-        called.append((base_idx, order, scope))
+    def fake_beep(app_idx, tab_idx=None, scope=None, **kwargs):
+        called.append((app_idx, tab_idx, scope))
 
     monkeypatch.setattr(pkg, "play_beep", fake_beep)
 
     plugin.event_gainFocus(focus, lambda: None)
 
-    # base_idx=0(첫 번째 SCOPE_WINDOW entry), order=1, scope=window
-    assert called == [(0, 1, "window")], f"비프 호출 누락: got={called}"
+    # v4: appBeepMap[notepad]=0, 첫 window tabBeepIdx=0, scope=window
+    assert called == [(0, 0, "window")], f"비프 호출 누락: got={called}"

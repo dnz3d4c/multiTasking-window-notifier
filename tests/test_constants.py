@@ -4,6 +4,7 @@
 from globalPlugins.multiTaskingWindowNotifier.constants import (
     ADDON_NAME,
     BEEP_TABLE,
+    BEEP_TABLE_SIZE,
     MAX_ITEMS,
 )
 
@@ -12,8 +13,13 @@ def test_addon_name():
     assert ADDON_NAME == "multiTaskingWindowNotifier"
 
 
-def test_beep_table_length_matches_max_items():
-    assert len(BEEP_TABLE) == MAX_ITEMS == 64
+def test_beep_table_size_is_64():
+    assert len(BEEP_TABLE) == BEEP_TABLE_SIZE == 64
+
+
+def test_max_items_decoupled_from_palette():
+    # v4: MAX_ITEMS는 BEEP_TABLE 크기와 분리되어 entry 상한만 의미. 팔레트 공유 가능.
+    assert MAX_ITEMS >= BEEP_TABLE_SIZE
 
 
 def test_beep_table_monotonic_increasing():

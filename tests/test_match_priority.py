@@ -34,13 +34,13 @@ def plugin(monkeypatch, tmp_path):
 
 
 def _capture_beeps(monkeypatch):
-    """play_beep 호출을 캡처하는 fake 설치."""
+    """play_beep 호출을 캡처하는 fake 설치. v4 시그니처 (app_idx, tab_idx, scope)."""
     import globalPlugins.multiTaskingWindowNotifier as pkg
 
     calls = []
 
-    def fake(base_idx, order, scope, **kwargs):
-        calls.append((base_idx, order, scope))
+    def fake(app_idx, tab_idx=None, scope=None, **kwargs):
+        calls.append((app_idx, tab_idx, scope))
 
     monkeypatch.setattr(pkg, "play_beep", fake)
     return calls
@@ -56,7 +56,7 @@ def _seed(plugin, items):
 
 
 def test_window_match_wins_over_app_match(plugin, monkeypatch):
-    """창 + 앱이 동시 등록일 때 창 매치가 우선."""
+    """창 + 앱이 동시 등록일 때 창 매치가 우선. v4: (app_idx, tab_idx, scope)."""
     _seed(plugin, [
         ("chrome", SCOPE_APP),
         ("chrome|YouTube", SCOPE_WINDOW),
@@ -65,12 +65,12 @@ def test_window_match_wins_over_app_match(plugin, monkeypatch):
 
     plugin._match_and_beep("chrome", "YouTube")
 
-    # base_idx=0(chrome app entry), order=1(첫 SCOPE_WINDOW), scope=window
-    assert calls == [(0, 1, SCOPE_WINDOW)]
+    # appBeepMap[chrome]=0 (첫 할당), chrome 내 첫 window tabBeepIdx=0
+    assert calls == [(0, 0, SCOPE_WINDOW)]
 
 
 def test_app_match_used_as_fallback(plugin, monkeypatch):
-    """창 매치가 없으면 앱 매치로 fallback."""
+    """창 매치가 없으면 앱 매치로 fallback. scope=app은 tab_idx=None 단음."""
     _seed(plugin, [
         ("chrome", SCOPE_APP),
     ])
@@ -78,17 +78,17 @@ def test_app_match_used_as_fallback(plugin, monkeypatch):
 
     plugin._match_and_beep("chrome", "어떤 탭이든")
 
-    # SCOPE_APP은 order 무시, base_idx=0(chrome app entry), order=1
-    assert calls == [(0, 1, SCOPE_APP)]
+    # appBeepMap[chrome]=0, scope=app이므로 tab_idx=None
+    assert calls == [(0, None, SCOPE_APP)]
 
 
-def test_window_order_increments_per_appid(plugin, monkeypatch):
-    """같은 appId 창 entry의 order가 등록 순서로 증가."""
+def test_window_tab_beep_is_distinct_per_window(plugin, monkeypatch):
+    """같은 appId 내 서로 다른 window는 서로 다른 tabBeepIdx를 받는다."""
     _seed(plugin, [
-        ("chrome", SCOPE_APP),                # idx=0
-        ("chrome|Tab A", SCOPE_WINDOW),       # idx=1, order=1
-        ("notepad|Memo", SCOPE_WINDOW),       # idx=2, 다른 앱이라 카운트 영향 없음
-        ("chrome|Tab B", SCOPE_WINDOW),       # idx=3, order=2
+        ("chrome", SCOPE_APP),                # appBeepMap[chrome]=0
+        ("chrome|Tab A", SCOPE_WINDOW),       # chrome 내 첫 window → tabBeepIdx=0
+        ("notepad|Memo", SCOPE_WINDOW),       # 새 appId → appBeepMap[notepad]=63
+        ("chrome|Tab B", SCOPE_WINDOW),       # chrome 내 두 번째 → tabBeepIdx=63
     ])
     calls = _capture_beeps(monkeypatch)
 
@@ -97,25 +97,27 @@ def test_window_order_increments_per_appid(plugin, monkeypatch):
     plugin._last_matched_ts = 0.0
     plugin._match_and_beep("chrome", "Tab B")
 
+    # Tab A / Tab B 모두 chrome 앱 비프 공유(app_idx=0), 탭 비프는 0과 63으로 분리.
     assert calls == [
-        (0, 1, SCOPE_WINDOW),  # base=app(chrome) idx=0, order=1
-        (0, 2, SCOPE_WINDOW),  # base=app(chrome) idx=0, order=2
+        (0, 0, SCOPE_WINDOW),
+        (0, 63, SCOPE_WINDOW),
     ]
 
 
-def test_window_without_app_entry_uses_first_window_idx(plugin, monkeypatch):
-    """앱 entry가 없으면 같은 appId 첫 창 entry idx가 base_idx."""
+def test_window_without_app_entry_still_has_app_beep(plugin, monkeypatch):
+    """scope=app entry가 없어도 appBeepMap은 자동 할당되어 app_idx 확보."""
     _seed(plugin, [
-        ("notepad|Memo A", SCOPE_WINDOW),  # idx=0, order=1
-        ("chrome|YouTube", SCOPE_WINDOW),  # idx=1
-        ("notepad|Memo B", SCOPE_WINDOW),  # idx=2, order=2
+        ("notepad|Memo A", SCOPE_WINDOW),  # appBeepMap[notepad]=0, tabBeepIdx=0
+        ("chrome|YouTube", SCOPE_WINDOW),  # appBeepMap[chrome]=63, tabBeepIdx=0
+        ("notepad|Memo B", SCOPE_WINDOW),  # notepad 두 번째 → tabBeepIdx=63
     ])
     calls = _capture_beeps(monkeypatch)
 
     plugin._match_and_beep("notepad", "Memo B")
 
-    # notepad의 첫 창 entry는 idx=0(Memo A) → base_idx=0, order=2
-    assert calls == [(0, 2, SCOPE_WINDOW)]
+    # notepad는 app entry 없이도 appBeepMap에 등록되어 app_idx=0.
+    # Memo B는 notepad 두 번째 window라 tabBeepIdx=63.
+    assert calls == [(0, 63, SCOPE_WINDOW)]
 
 
 def test_dedup_guard_suppresses_consecutive_match(plugin, monkeypatch):
@@ -152,15 +154,15 @@ def test_no_match_is_silent(plugin, monkeypatch):
     assert calls == []
 
 
-def test_title_only_reverse_mapping_returns_full_entry(plugin, monkeypatch):
-    """title 역매핑으로 매치되어도 record_switch에는 entry 풀키가 전달돼야 함."""
+def test_title_only_reverse_mapping_uses_real_app_beep(plugin, monkeypatch):
+    """title 역매핑 매치 시 entry의 real appId로 appBeepMap을 조회."""
     _seed(plugin, [("notepad|Memo", SCOPE_WINDOW)])
     calls = _capture_beeps(monkeypatch)
 
-    # title만 일치하는 케이스 (Alt+Tab 오버레이가 obj.appId='explorer'로 전달)
+    # 호출 인자 appId='explorer'(Alt+Tab 오버레이)지만 matched_key의 real appId는 notepad.
     plugin._match_and_beep("explorer", "Memo")
 
-    assert calls == [(0, 1, SCOPE_WINDOW)]
+    assert calls == [(0, 0, SCOPE_WINDOW)]
     # 메타가 정확히 "notepad|Memo" entry에 기록되었는지 확인
     meta = appListStore.get_meta(plugin.appListFile, "notepad|Memo")
     assert meta["switchCount"] == 1

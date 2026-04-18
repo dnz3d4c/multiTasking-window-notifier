@@ -54,11 +54,13 @@ def test_register_creates_section_and_fills_defaults(real_config):
 
     assert ADDON_KEY in real_config
     section = real_config[ADDON_KEY]
-    assert section["beepDuration"] == 100
+    # v4: 2음 재생으로 duration 단축 + gap 신설. maxItems는 BEEP_TABLE과 디커플.
+    assert section["beepDuration"] == 50
+    assert section["beepGapMs"] == 15
     assert section["beepVolumeLeft"] == 50
     assert section["beepVolumeRight"] == 50
     assert section["enableAllWindows"] is False
-    assert section["maxItems"] == 64
+    assert section["maxItems"] == 128
 
 
 def test_register_preserves_user_values(real_config):
@@ -85,7 +87,7 @@ def test_get_fallback_when_section_missing(real_config):
     from globalPlugins.multiTaskingWindowNotifier import settings
 
     # register 없이 get 호출 — 섹션 부재 시 CONFSPEC default 폴백
-    assert settings.get("beepDuration") == 100
+    assert settings.get("beepDuration") == 50
     assert settings.get("enableAllWindows") is False
 
 

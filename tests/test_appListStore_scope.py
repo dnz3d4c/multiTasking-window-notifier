@@ -21,11 +21,11 @@ def _read_json(path):
         return json.load(f)
 
 
-def test_save_writes_version_3(tmp_path):
+def test_save_writes_version_4(tmp_path):
     path = _list_path(tmp_path)
     appListStore.save(path, ["a|t1"])
     data = _read_json(_json_path(tmp_path))
-    assert data["version"] == 3
+    assert data["version"] == 4
 
 
 def test_new_keys_default_to_window_scope(tmp_path):
@@ -95,8 +95,8 @@ def test_v2_file_loads_with_window_scope_injected(tmp_path):
     assert m2["switchCount"] == 1
 
 
-def test_v2_file_promotes_to_v3_on_save(tmp_path):
-    """v2 로드 후 어떤 변경(record_switch + flush)이 일어나면 디스크가 v3로 승격."""
+def test_v2_file_promotes_to_v4_on_load(tmp_path):
+    """v2 로드 시 스스로 v4로 승격 (appBeepMap/tabBeepIdx 자동 주입)."""
     json_path = _json_path(tmp_path)
     os.makedirs(os.path.dirname(json_path), exist_ok=True)
     with open(json_path, "w", encoding="utf-8") as f:
@@ -109,13 +109,15 @@ def test_v2_file_promotes_to_v3_on_save(tmp_path):
 
     list_path = _list_path(tmp_path)
     appListStore.load(list_path)
-    appListStore.record_switch(list_path, "a|t1")
-    assert appListStore.flush(list_path) is True
 
     data = _read_json(json_path)
-    assert data["version"] == 3
-    # 저장된 항목에도 scope 필드가 채워짐
+    assert data["version"] == 4
+    # 저장된 항목에 scope 필드 + tabBeepIdx 채워짐
     assert data["items"][0]["scope"] == SCOPE_WINDOW
+    assert isinstance(data["items"][0]["tabBeepIdx"], int)
+    # top-level appBeepMap에 appId 등록됨
+    assert "appBeepMap" in data
+    assert "a" in data["appBeepMap"]
 
 
 def test_unknown_scope_value_is_coerced_to_window(tmp_path):

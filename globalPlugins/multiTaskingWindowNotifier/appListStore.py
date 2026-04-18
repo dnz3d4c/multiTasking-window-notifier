@@ -3,12 +3,14 @@
 
 """앱 목록 + 메타데이터 저장소.
 
-파일 포맷 (`app.json`, version=3):
+파일 포맷 (`app.json`, version=4):
     {
-      "version": 3,
+      "version": 4,
+      "appBeepMap": {"chrome": 0, "notepad": 24, ...},
       "items": [
         {"key": "appId|title", "scope": "window",
          "appId": "...", "title": "...",
+         "tabBeepIdx": 0,
          "registeredAt": "YYYY-MM-DDTHH:MM:SS",
          "switchCount": 0,
          "lastSeenAt": null | "YYYY-MM-DDTHH:MM:SS"},
@@ -18,11 +20,22 @@
       ]
     }
 
+v4 변경점:
+    - top-level `appBeepMap` — appId → BEEP_TABLE 인덱스. 같은 appId의 모든
+      scope=window entry가 공유하는 "앱 비프"(a). scope=app entry가 없어도
+      자동 할당되어 모든 appId가 항상 base 음을 가진다.
+    - scope=window entry에 `tabBeepIdx` 필드 — 같은 appId 내에서 고유한 "탭
+      비프"(b). scope=app entry는 tabBeepIdx를 갖지 않음(단음 재생).
+    - entry 리스트 idx와 비프 idx가 완전 분리 — 중간 entry 삭제가 다른 entry의
+      주파수에 영향 없음.
+
 하위 호환:
-    - v2 (scope 필드 없음): 모든 항목을 scope="window"로 자동 마이그레이션.
-      다음 save() 시점에 version=3로 기록되며 원본은 그대로 덮어쓰기.
-    - `app.json`이 없고 `app.list`가 있으면 최초 `load()`에서 JSON(v3)으로 마이그레이션.
-      모든 줄을 scope="window"로 등록 후 `app.list.bak`으로 백업.
+    - v3 (appBeepMap 없음, tabBeepIdx 없음): 로드 시 거리 기반 알고리즘으로
+      appBeepMap과 tabBeepIdx를 재할당. 기존 enumerate idx는 버린다. 사용자는
+      주파수 재학습 필요하나 변별력이 최대화됨.
+    - v2 (scope 필드 없음): v3 경유 자동 마이그레이션 후 v4로 승격.
+    - `app.json`이 없고 `app.list`가 있으면 최초 `load()`에서 JSON(v4)으로 마이그레이션.
+      모든 줄을 scope="window"로 등록 + 거리 기반 할당 후 `app.list.bak`으로 백업.
     - 새 설치(둘 다 없음)는 빈 목록으로 시작.
 
 외부 API (기존 호출부 호환):
@@ -32,6 +45,8 @@
     flush(path)              -> None          dirty 상태면 디스크 쓰기 (원자적)
     reload(path)             -> list[str]    flush 후 캐시 무효화 + 재로드
     get_meta(path, key)      -> dict|None    항목 메타 조회
+    get_app_beep_idx(path, appId) -> int|None  appBeepMap 조회 (v4)
+    get_tab_beep_idx(path, key)   -> int|None  scope=window entry의 tabBeepIdx (v4)
     prune_stale(path, iso)   -> list[str]    (#7 창 닫기 알림 기능 대비)
 
 path 인자는 기존 `app.list` 경로를 그대로 받는다. 내부에서 같은 디렉터리의
@@ -45,14 +60,20 @@ from datetime import datetime
 from logHandler import log
 
 from .appIdentity import makeKey, normalize_title, splitKey
-from .constants import MAX_ITEMS, SCOPE_APP, SCOPE_WINDOW
+from .constants import BEEP_TABLE_SIZE, MAX_ITEMS, SCOPE_APP, SCOPE_WINDOW
 
 # 본 모듈은 데이터 레이어다. 실패 시 `log`로만 보고하고 `ui.message`는 호출하지 않는다.
 # 사용자 대면 알림은 상위 레이어(__init__.py의 script_* 등)에서 반환값으로 판단해 처리.
 
 
 # path(app.list 경로) → 상태 캐시
-# 상태 형태: {"items": list[dict], "dirty": bool, "corrupted": bool}
+# 상태 형태:
+#   {
+#     "items": list[dict],       # 각 entry 메타. scope=window는 tabBeepIdx 포함
+#     "appBeepMap": dict,        # appId → BEEP_TABLE idx (v4). 같은 appId entry들이 공유
+#     "dirty": bool,             # 미저장 변경 유무
+#     "corrupted": bool,         # 손상된 app.json 감지 플래그
+#   }
 #   corrupted: 최근 _load_state가 손상된 app.json을 만나 빈 상태로 초기화한 경우 True.
 #              사용자 안내용 플래그. save() 성공 시 False로 리셋.
 _states = {}
@@ -86,17 +107,18 @@ def _now_iso() -> str:
 # ------------ 내부 상태 로드/저장 ------------
 
 
-def _new_meta(key: str, scope: str = SCOPE_WINDOW) -> dict:
+def _new_meta(key: str, scope: str = SCOPE_WINDOW, tabBeepIdx: int = None) -> dict:
     """새 메타 항목 생성.
 
-    scope=SCOPE_APP이면 key는 appId 자체, title은 빈 문자열.
+    scope=SCOPE_APP이면 key는 appId 자체, title은 빈 문자열, tabBeepIdx 없음.
     scope=SCOPE_WINDOW이면 key는 'appId|title' 복합키 형식이고 splitKey로 분해.
+    tabBeepIdx는 scope=window 전용 필드로, 같은 appId 내 고유 탭 비프(b) idx.
     """
     if scope == SCOPE_APP:
         appId, title = key, ""
     else:
         appId, title = splitKey(key)
-    return {
+    meta = {
         "key": key,
         "scope": scope,
         "appId": appId,
@@ -105,22 +127,57 @@ def _new_meta(key: str, scope: str = SCOPE_WINDOW) -> dict:
         "switchCount": 0,
         "lastSeenAt": None,
     }
+    if scope == SCOPE_WINDOW and tabBeepIdx is not None:
+        meta["tabBeepIdx"] = int(tabBeepIdx)
+    return meta
+
+
+def _assign_distant_idx(used, size: int = BEEP_TABLE_SIZE) -> int:
+    """거리 기반 인덱스 할당.
+
+    `used`에 포함되지 않은 i in [0, size) 중 min_j|i - used_j|가 최대인 i 반환.
+    동률이면 가장 작은 i. used가 비면 0.
+
+    포화 상태(len(used) >= size)에서도 가장 먼 기존 idx와의 거리 최대값을 반환
+    (중복 허용). 호출부는 포화 로그를 자체적으로 남길 수 있다.
+
+    Args:
+        used: iterable of int. BEEP_TABLE idx 집합.
+        size: 팔레트 크기. 기본 BEEP_TABLE_SIZE.
+
+    Returns:
+        int: 할당된 idx (0 ≤ result < size).
+    """
+    used_list = [int(x) for x in used if isinstance(x, int) or str(x).lstrip("-").isdigit()]
+    if not used_list:
+        return 0
+    best_i = 0
+    best_dist = -1
+    for i in range(size):
+        dist = min(abs(i - u) for u in used_list)
+        if dist > best_dist:
+            best_dist = dist
+            best_i = i
+    return best_i
 
 
 def _load_from_json(json_path: str):
     """Returns:
-        list: 정상 로드(파일 없거나 비어있으면 빈 리스트).
+        tuple(list, dict): 정상 로드 (items, appBeepMap). 파일 없거나 비어있으면 ([], {}).
         None: 파일은 있으나 파싱/구조 실패 (손상 신호).
 
-    None과 빈 리스트를 구분하는 이유:
+    None과 ([], {})를 구분하는 이유:
         호출부(`_load_state`)가 "정상적으로 비어있음(=마이그레이션/백업 가능)"과
         "손상으로 인한 빈 상태(=구형 app.list는 건드리지 말고 보존)"를 구분해야 한다.
+
+    appBeepMap은 v4부터 디스크에 저장된다. v3 이하는 빈 dict로 반환되고 호출부가
+    거리 기반 알고리즘으로 재할당한다.
     """
     try:
         with open(json_path, "r", encoding="utf-8") as f:
             data = json.load(f)
     except FileNotFoundError:
-        return []
+        return ([], {})
     except Exception:
         log.error(f"mtwn: app.json load failed (JSON parse) path={json_path}", exc_info=True)
         return None
@@ -137,10 +194,28 @@ def _load_from_json(json_path: str):
             f"mtwn: app.json has {len(items)} items, exceeds limit({MAX_ITEMS}). "
             f"Only first {MAX_ITEMS} will be loaded."
         )
+
+    raw_app_beep_map = data.get("appBeepMap", {})
+    if not isinstance(raw_app_beep_map, dict):
+        log.warning(f"mtwn: app.json 'appBeepMap' field is not dict path={json_path}")
+        raw_app_beep_map = {}
+    # 값 검증: int + BEEP_TABLE 범위. 벗어나면 버림(호출부가 재할당).
+    app_beep_map = {}
+    for app_id, idx in raw_app_beep_map.items():
+        if not isinstance(app_id, str):
+            continue
+        if not isinstance(idx, int) or not (0 <= idx < BEEP_TABLE_SIZE):
+            log.warning(
+                f"mtwn: appBeepMap[{app_id!r}]={idx!r} invalid, will be reassigned"
+            )
+            continue
+        app_beep_map[app_id] = idx
+
     # 필수 필드 보강 (옛 포맷/손상 대비).
-    # v2 → v3 자동 마이그레이션:
+    # v2 → v3 → v4 자동 마이그레이션:
     #   - scope 누락 → SCOPE_WINDOW로 보정 (v2는 창 단위만 등록 가능했음)
     #   - 알 수 없는 scope 값 → SCOPE_WINDOW로 보정 (손상/오타 대비)
+    #   - scope=window의 tabBeepIdx 누락/무효 → 호출부가 거리 기반 재할당 (v3 이하)
     fixed = []
     for it in items[:MAX_ITEMS]:
         if not isinstance(it, dict) or "key" not in it:
@@ -154,25 +229,47 @@ def _load_from_json(json_path: str):
             scope = SCOPE_WINDOW
         meta = _new_meta(it["key"], scope=scope)
         # 디스크 값으로 메타 덮어쓰기. 단 scope는 위에서 정규화한 값이 우선이므로
-        # 디스크 값으로 다시 덮이지 않도록 별도 처리.
+        # 디스크 값으로 다시 덮이지 않도록 별도 처리. tabBeepIdx는 scope=window에서
+        # 유효 정수일 때만 수용.
         for k, v in it.items():
             if k == "scope":
+                continue
+            if k == "tabBeepIdx":
+                if scope == SCOPE_WINDOW and isinstance(v, int) and 0 <= v < BEEP_TABLE_SIZE:
+                    meta["tabBeepIdx"] = v
                 continue
             if k in meta:
                 meta[k] = v
         fixed.append(meta)
-    return fixed
+    return (fixed, app_beep_map)
 
 
 def _migrate_from_list(list_path: str) -> list:
-    """구형 `app.list` → 메타 딕셔너리 리스트."""
+    """구형 `app.list` → 메타 딕셔너리 리스트.
+
+    v1 텍스트 포맷은 한 줄당 `appId|title` 또는 `title`만. title-only 줄은
+    appId가 비게 되어 `_ensure_beep_assignments`가 appBeepMap에 등록할 수 없다.
+    이런 줄은 placeholder appId("_legacy_<idx>")로 승격해 비프 할당을 받게 한다.
+    """
     items = []
     try:
         with open(list_path, "r", encoding="utf-8") as f:
-            for line in f:
+            for idx, line in enumerate(f):
                 k = line.strip()
-                if k:
-                    items.append(_new_meta(k))
+                if not k:
+                    continue
+                meta = _new_meta(k)
+                if not meta.get("appId"):
+                    # "|" 없는 구형 줄 — splitKey가 ("", k)를 반환해 appId가 빔.
+                    # 비프 할당을 받도록 고유 placeholder appId 부여.
+                    placeholder = f"_legacy_{idx}"
+                    new_key = makeKey(placeholder, k)
+                    log.warning(
+                        f"mtwn: legacy title-only entry {k!r} promoted to "
+                        f"placeholder appId={placeholder!r}"
+                    )
+                    meta = _new_meta(new_key)
+                items.append(meta)
     except Exception:
         log.error(f"mtwn: app.list migration load failed path={list_path}", exc_info=True)
         return []
@@ -192,7 +289,11 @@ def _save_to_disk(list_path: str, state: dict) -> bool:
         return False
 
     tmp = json_path + ".tmp"
-    payload = {"version": 3, "items": state["items"][:MAX_ITEMS]}
+    payload = {
+        "version": 4,
+        "appBeepMap": dict(state.get("appBeepMap", {})),
+        "items": state["items"][:MAX_ITEMS],
+    }
     try:
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(payload, f, ensure_ascii=False, indent=2)
@@ -284,6 +385,79 @@ def _mark_dirty_if_changed(state: dict, new_items: list, changed: bool) -> bool:
     return changed
 
 
+def _ensure_beep_assignments(state: dict) -> bool:
+    """appBeepMap과 tabBeepIdx를 채워 넣는다. v3→v4 마이그레이션 핵심.
+
+    처리 순서 (결정론적):
+        ① state['items'] 중 scope=window entry 순회해 appId 집합 수집
+        ② appBeepMap에 빠진 appId 있으면 거리 기반 재할당 (순서: 등장 순)
+        ③ scope=window entry 중 tabBeepIdx 없는 항목은 같은 appId의 기존
+           tabBeepIdx 세트와 거리 최대값으로 재할당
+        ④ 하나라도 추가됐으면 changed=True 반환 (호출부가 dirty/save 처리)
+
+    이 함수는 state['appBeepMap']과 각 scope=window entry의 tabBeepIdx를 제자리
+    변경한다. scope=app entry는 tabBeepIdx를 갖지 않으므로 건너뛴다.
+
+    포화 처리 (len(used) >= BEEP_TABLE_SIZE): `_assign_distant_idx`가 이미 중복
+    허용 방식으로 최대 거리 idx를 반환하므로 별도 분기 없이 동작. log.warning
+    남기고 할당 진행.
+
+    Returns: 뭐라도 추가됐으면 True.
+    """
+    items = state.get("items", [])
+    app_beep_map = state.setdefault("appBeepMap", {})
+    changed = False
+
+    # ① + ②: appBeepMap 채우기. scope 관계없이 모든 entry의 appId에 대해 할당.
+    for it in items:
+        app_id = it.get("appId", "")
+        if not app_id or app_id in app_beep_map:
+            continue
+        used = list(app_beep_map.values())
+        if len(set(used)) >= BEEP_TABLE_SIZE:
+            log.warning(
+                f"mtwn: appBeepMap saturated (>= {BEEP_TABLE_SIZE}), "
+                f"appId={app_id!r} will share existing idx"
+            )
+        new_idx = _assign_distant_idx(used, size=BEEP_TABLE_SIZE)
+        app_beep_map[app_id] = new_idx
+        changed = True
+        log.info(f"mtwn: assign appBeepMap[{app_id!r}] = {new_idx}")
+
+    # ③: scope=window entry에 tabBeepIdx 채우기. 같은 appId 내 기존 tabBeepIdx와
+    # 거리 최대화. 이미 있는 항목은 건드리지 않음.
+    tab_idx_by_app = {}
+    for it in items:
+        if it.get("scope") != SCOPE_WINDOW:
+            continue
+        app_id = it.get("appId", "")
+        existing = it.get("tabBeepIdx")
+        if isinstance(existing, int) and 0 <= existing < BEEP_TABLE_SIZE:
+            tab_idx_by_app.setdefault(app_id, []).append(existing)
+    for it in items:
+        if it.get("scope") != SCOPE_WINDOW:
+            continue
+        if isinstance(it.get("tabBeepIdx"), int):
+            continue
+        app_id = it.get("appId", "")
+        used = tab_idx_by_app.setdefault(app_id, [])
+        if len(set(used)) >= BEEP_TABLE_SIZE:
+            log.warning(
+                f"mtwn: tabBeepIdx saturated for appId={app_id!r}, "
+                f"key={it.get('key')!r} will share existing idx"
+            )
+        new_idx = _assign_distant_idx(used, size=BEEP_TABLE_SIZE)
+        it["tabBeepIdx"] = new_idx
+        used.append(new_idx)
+        changed = True
+        log.info(
+            f"mtwn: assign tabBeepIdx key={it.get('key')!r} "
+            f"appId={app_id!r} idx={new_idx}"
+        )
+
+    return changed
+
+
 def _normalize_titles_in_place(state: dict) -> bool:
     """state['items']의 SCOPE_WINDOW 각 항목 title에 `normalize_title` 적용.
 
@@ -316,13 +490,14 @@ def _load_state(list_path: str) -> dict:
       ③ JSON 로드 또는 legacy `app.list` 마이그레이션
       ④ legacy 백업 — 신뢰 가능한 JSON이 확보된 경우만 1회
       ⑤ title normalize 마이그레이션 ("제목 없음 - 메모장" → "제목 없음")
-      ⑥ 캐시 등록
+      ⑥ v3→v4 비프 할당 마이그레이션 (appBeepMap + tabBeepIdx 자동 채움)
+      ⑦ 캐시 등록
     """
     # ① 캐시
     if list_path in _states:
         return _states[list_path]
 
-    state = {"items": [], "dirty": False, "corrupted": False}
+    state = {"items": [], "appBeepMap": {}, "dirty": False, "corrupted": False}
     # ② 경로 결정
     json_path = _json_path(list_path)
 
@@ -344,7 +519,9 @@ def _load_state(list_path: str) -> dict:
             state["corrupted"] = True
             # state["items"]는 기본값 [] 유지. dirty=False도 유지(손상을 덮어쓰지 않도록).
         else:
-            state["items"] = loaded
+            loaded_items, loaded_map = loaded
+            state["items"] = loaded_items
+            state["appBeepMap"] = loaded_map
             json_trustworthy = True
     elif os.path.exists(list_path):
         # 구형 app.list 마이그레이션
@@ -352,6 +529,8 @@ def _load_state(list_path: str) -> dict:
         if migrated:
             state["items"] = migrated
             state["dirty"] = True
+            # 비프 할당을 먼저 채워 두고 저장 (디스크에 v4 포맷으로 기록).
+            _ensure_beep_assignments(state)
             if _save_to_disk(list_path, state):
                 state["dirty"] = False
                 json_trustworthy = True
@@ -372,7 +551,15 @@ def _load_state(list_path: str) -> dict:
             state["dirty"] = False
         # 저장 실패 시 dirty 유지 → 다음 flush/save에서 재시도
 
-    # ⑥ 캐시 등록
+    # ⑥ v3→v4 비프 할당 마이그레이션. 이미 v4 완결 파일이면 no-op.
+    # legacy app.list 경로는 ③에서 이미 ensure한 뒤 저장했으므로 여기서는 보통
+    # 변경 없다. JSON 로드 경로에서 appBeepMap/tabBeepIdx가 빠졌을 때만 채움.
+    if _ensure_beep_assignments(state):
+        state["dirty"] = True
+        if _save_to_disk(list_path, state):
+            state["dirty"] = False
+
+    # ⑦ 캐시 등록
     _states[list_path] = state
     return state
 
@@ -411,10 +598,17 @@ def save(list_path: str, keys, scopes=None) -> bool:
         else:
             new_items.append(_new_meta(k, scope=scopes.get(k, SCOPE_WINDOW)))
     # 임시 상태로 먼저 디스크 쓰기 시도. 성공 시에만 메모리 반영.
-    temp_state = {"items": new_items, "dirty": True}
+    # appBeepMap은 기존 상태에서 복사 — 새 appId가 있으면 _ensure_beep_assignments가 할당.
+    temp_state = {
+        "items": new_items,
+        "appBeepMap": dict(state.get("appBeepMap", {})),
+        "dirty": True,
+    }
+    _ensure_beep_assignments(temp_state)
     if not _save_to_disk(list_path, temp_state):
         return False
     state["items"] = new_items
+    state["appBeepMap"] = temp_state["appBeepMap"]
     state["dirty"] = False
     # 저장 성공 시 손상 플래그 해소. 사용자가 빈 상태를 인지한 뒤 새 항목을 추가해
     # 정상 파일로 전환된 상태.
@@ -482,6 +676,38 @@ def get_meta(list_path: str, key: str):
         if it.get("key") == key:
             # 얕은 복사본 반환 (외부에서 실수로 변조 방지)
             return dict(it)
+    return None
+
+
+def get_app_beep_idx(list_path: str, appId: str):
+    """appId에 할당된 BEEP_TABLE 인덱스(앱 비프 a) 조회.
+
+    appBeepMap에 없으면 None. 호출부는 None이면 매칭 실패로 간주하거나
+    fallback 로직을 적용할 수 있다. 정상 흐름에서는 _ensure_beep_assignments가
+    모든 등록 appId에 대해 채워두므로 None이 나오면 드문 타이밍 이슈일 수 있다.
+    """
+    state = _load_state(list_path)
+    idx = state.get("appBeepMap", {}).get(appId)
+    if isinstance(idx, int) and 0 <= idx < BEEP_TABLE_SIZE:
+        return idx
+    return None
+
+
+def get_tab_beep_idx(list_path: str, key: str):
+    """scope=window entry의 tabBeepIdx(탭 비프 b) 조회.
+
+    scope=app entry이거나 해당 key가 없거나 tabBeepIdx가 비어 있으면 None.
+    None이면 2음 재생이 아닌 단음 재생(scope=app과 동일)이 호출부 정책.
+    """
+    state = _load_state(list_path)
+    for it in state["items"]:
+        if it.get("key") == key:
+            if it.get("scope") != SCOPE_WINDOW:
+                return None
+            idx = it.get("tabBeepIdx")
+            if isinstance(idx, int) and 0 <= idx < BEEP_TABLE_SIZE:
+                return idx
+            return None
     return None
 
 

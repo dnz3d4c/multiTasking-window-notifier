@@ -55,7 +55,8 @@ def test_boot_creates_config_defaults(booted_plugin):
     _plugin, conf = booted_plugin
 
     assert ADDON_KEY in conf
-    assert conf[ADDON_KEY]["beepDuration"] == 100
+    assert conf[ADDON_KEY]["beepDuration"] == 50
+    assert conf[ADDON_KEY]["beepGapMs"] == 15
     assert conf[ADDON_KEY]["enableAllWindows"] is False
 
 

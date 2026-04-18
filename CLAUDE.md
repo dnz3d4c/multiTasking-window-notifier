@@ -159,11 +159,11 @@ NVDA 스크린 리더 추가 기능으로 Alt+Tab를 눌렀을 때 여러 창을
   - globalPlugins\multiTaskingWindowNotifier\appListStore.py: 앱 목록 + 메타데이터 JSON 저장소 (load/save/record_switch/flush/reload/get_meta/prune_stale, load 시 title normalize 자동 마이그레이션. reset_cache는 테스트 전용)
   - globalPlugins\multiTaskingWindowNotifier\tabClasses.py: 앱별 탭 컨트롤 wcn 매핑(editor/overlay) + 자동 학습 저장소. event_gainFocus에서 고빈도 조회(캐시 set 기반)
   - globalPlugins\multiTaskingWindowNotifier\windowInfo.py: 포커스 창 정보 추출 및 설정 디렉터리 헬퍼 (반환 title은 normalize 적용됨)
-  - globalPlugins\multiTaskingWindowNotifier\beepPlayer.py: scope/order 기반 단음 비프 재생 (`play_beep`, scope=app은 base 단음/scope=window는 base±반음 변주)
+  - globalPlugins\multiTaskingWindowNotifier\beepPlayer.py: v4 2차원 비프 재생 (`play_beep(app_idx, tab_idx, scope)` — scope=app은 a 단음, scope=window는 a→gap→b 2음. core.callLater 우선 + wx.CallLater 폴백)
   - globalPlugins\multiTaskingWindowNotifier\listDialog.py: 등록 목록 wx.Dialog. 다중 선택 + Delete 키 + 앱 항목 일괄 삭제 확인 흐름 제공
   - globalPlugins\multiTaskingWindowNotifier\settings.py: NVDA config 스키마 정의 및 register/get 헬퍼
   - globalPlugins\multiTaskingWindowNotifier\settingsPanel.py: NVDA 설정 대화상자의 "창 전환 알림" 패널 (SettingsPanel 구현)
-  - globalPlugins\multiTaskingWindowNotifier\app.json: 등록된 앱·창 목록 + 메타(전환 카운트/마지막 사용 시각/등록일). 하위호환으로 `app.list`가 있으면 최초 로드 시 자동 마이그레이션 후 `app.list.bak`으로 백업
+  - globalPlugins\multiTaskingWindowNotifier\app.json: v4 — top-level `appBeepMap`(appId→BEEP_TABLE idx) + items[].tabBeepIdx(scope=window 전용). 등록된 앱·창 목록 + 메타(전환 카운트/마지막 사용 시각/등록일). v3 로드 시 거리 기반 자동 재할당. `app.list`가 있으면 최초 로드 시 자동 마이그레이션 후 `app.list.bak`으로 백업
   - globalPlugins\multiTaskingWindowNotifier\tabClasses.json: 앱별 editor/overlay wcn 매핑. 파일 없으면 기본값(메모장/Notepad++)으로 자동 생성. 새 앱에서 NVDA+Shift+T 등록 시 editor wcn 자동 학습
 ## *중요* 모듈 문서화 원칙
 - **새 모듈 추가 시**: 위 "주요 파일" 목록에 파일명과 역할을 한 줄로 추가
@@ -178,12 +178,12 @@ multiTaskingWindowNotifier/
 └── globalPlugins/
     └── multiTaskingWindowNotifier/
         ├── __init__.py                    # GlobalPlugin + 스크립트/이벤트 훅
-        ├── constants.py                   # ADDON_NAME, MAX_ITEMS, BEEP_TABLE
+        ├── constants.py                   # ADDON_NAME, MAX_ITEMS(128), BEEP_TABLE, BEEP_TABLE_SIZE(64)
         ├── appIdentity.py                 # 앱 식별/복합키 + normalize_title
-        ├── appListStore.py                # 앱 목록 + 메타 JSON 저장소 (load 시 title normalize 마이그레이션 포함)
+        ├── appListStore.py                # v4 JSON 저장소 (appBeepMap, tabBeepIdx, 거리 기반 할당)
         ├── tabClasses.py                  # 앱별 editor/overlay wcn 매핑 + 자동 학습
         ├── windowInfo.py                  # 창 정보·경로 헬퍼 (title normalize 적용)
-        ├── beepPlayer.py                  # 비프음 재생 (wx.CallLater 기반 비동기)
+        ├── beepPlayer.py                  # v4 2음 비프 (core.callLater 기반 gap 예약)
         ├── listDialog.py                  # 목록 표시 wx.Dialog
         ├── settings.py                    # NVDA config 스키마 (confspec)
         ├── settingsPanel.py               # NVDA 설정 > 창 전환 알림 패널
@@ -212,10 +212,11 @@ multiTaskingWindowNotifier/
   - `tabClasses` 모듈: 앱별 editor/overlay wcn 세트. `load()`가 DEFAULT와 합집합 병합, `is_*_class`는 캐시 set 조회(고빈도), `learn_editor`는 등록 성공 훅에서 best-effort 호출.
 
 ## 데이터 포맷
-### app.json (v3, Phase B 이후 title은 정규화된 형태)
+### app.json (v4, 2차원 비프 도입)
 ```json
 {
-  "version": 3,
+  "version": 4,
+  "appBeepMap": {"chrome": 0, "notepad": 63},
   "items": [
     {"key": "chrome", "scope": "app",
      "appId": "chrome", "title": "",
@@ -223,6 +224,7 @@ multiTaskingWindowNotifier/
      "switchCount": 0, "lastSeenAt": null},
     {"key": "notepad|제목 없음", "scope": "window",
      "appId": "notepad", "title": "제목 없음",
+     "tabBeepIdx": 0,
      "registeredAt": "2026-04-17T20:00:00",
      "switchCount": 0, "lastSeenAt": null}
   ]
@@ -230,15 +232,19 @@ multiTaskingWindowNotifier/
 ```
 - **인코딩**: UTF-8 (ensure_ascii=False)
 - **원자적 저장**: `.tmp` → `os.replace` 패턴
-- **최대 항목**: 64개 (MAX_ITEMS)
+- **최대 항목**: 128개 (MAX_ITEMS). v4부터 BEEP_TABLE_SIZE(64)와 디커플.
 - **scope 필드** (v3 신설)
-  - `"window"` — `appId|title` 복합키. 정확 매치 시 비프.
-  - `"app"` — `appId` 단독 키. 같은 appId의 어떤 창/탭이든 fallback 비프.
+  - `"window"` — `appId|title` 복합키. 정확 매치 시 2음(a→b) 재생.
+  - `"app"` — `appId` 단독 키. 같은 appId의 어떤 창/탭이든 fallback으로 a 단음.
+- **appBeepMap** (v4 신설, top-level): `{appId: BEEP_TABLE idx}`. 같은 appId의 모든 scope=window entry가 앱 비프(a)로 공유. scope=app entry가 없어도 자동 할당되어 모든 등록 appId가 base 음을 보유.
+- **tabBeepIdx** (v4 신설, scope=window entry 전용): 같은 appId 내에서 고유한 탭 비프(b) 인덱스. 이론 조합 앱 64 × 탭 64 = 4096.
+- **할당 알고리즘**: `_assign_distant_idx` — 기존 used 세트와 L1 거리 최대화. 첫 할당은 0, 두 번째는 63, 세 번째는 31, ... 포화 시 중복 허용 + log.warning.
 - **메타 필드**
   - `key` / `appId` / `title` — scope=app은 title이 빈 문자열
   - `registeredAt` / `switchCount` / `lastSeenAt` — 등록/사용 메타
-- **title 정규화** (Phase B): 등록 시점(`windowInfo.get_current_window_info`)과 로드 시점(`appListStore._load_state`) 모두 `normalize_title`을 거쳐 꼬리 " - 앱명" 한 덩이 제거. `"notepad|제목 없음 - 메모장"` 같은 구형 entry는 다음 로드 시 `"notepad|제목 없음"`으로 자동 변경되어 디스크에 영구화. v4 bump 없음.
-- **v2 → v3 자동 마이그레이션**: scope 필드가 없으면 모두 `"window"`로 보정. 다음 save 시 version=3로 디스크 승격.
+- **title 정규화** (Phase B): 등록 시점(`windowInfo.get_current_window_info`)과 로드 시점(`appListStore._load_state`) 모두 `normalize_title`을 거쳐 꼬리 " - 앱명" 한 덩이 제거.
+- **v3 → v4 자동 마이그레이션**: appBeepMap/tabBeepIdx가 없으면 `_ensure_beep_assignments`가 거리 기반으로 재할당. 사용자는 주파수 재학습 필요(변별력 최대화). 기존 enumerate idx는 버림.
+- **v2 → v3 → v4 자동 마이그레이션**: scope 필드 누락 시 `"window"`로 보정 후 v4 할당까지 연쇄 진행.
 
 ### tabClasses.json (v1, Phase B 신설)
 ```json
@@ -273,13 +279,17 @@ multiTaskingWindowNotifier/
 - `splitKey(entry)`: 복합키 파싱, 구형 포맷 호환
 - `normalize_title(name)`: 꼬리 " - 앱명" 한 덩이 제거. Alt+Tab obj.name, editor fg.name, MRU obj.name이 같은 형태로 떨어지게 함.
 
-### 비프음 테이블 / 재생
-- `BEEP_TABLE`: 64개 주파수 (130Hz~4978Hz, 반음 단위)
-- `play_beep(base_idx, order, scope, ...)` — 단음 1회 재생 (이중 비프 폐기)
-  - scope=app: BEEP_TABLE[base_idx] 단음 (order 무시)
-  - scope=window: BEEP_TABLE[base_idx] × SEMITONE_RATIO^(order-1)
-  - 같은 appId의 app entry가 있으면 그 idx가 base. 없으면 같은 appId 첫 창 entry idx
-- duration / left / right는 `config.conf` 설정 (Phase 1 이후)
+### 비프음 테이블 / 재생 (v4 2차원)
+- `BEEP_TABLE`: 64개 주파수 (130Hz~4978Hz, 반음 단위). `BEEP_TABLE_SIZE` 상수로 노출.
+- `play_beep(app_idx, tab_idx=None, scope, duration, gap_ms, left, right)` — 2차원 비프.
+  - scope=app 또는 tab_idx=None: `tones.beep(BEEP_TABLE[app_idx])` 단음 1회.
+  - scope=window + tab_idx 지정: a 재생 → `core.callLater(gap_ms, tones.beep, b)` 2음.
+  - `_schedule_second_beep` 폴백 순서: core.callLater → wx.CallLater → 동기 호출.
+- `_resolve_beep_pair(matched_key, scope, appId)`:
+  - real_app_id = matched_key에서 splitKey로 추출 (Alt+Tab 오버레이 title 역매핑 호환).
+  - app_idx = appBeepMap[real_app_id] (자동 할당 보장). tab_idx = entry.tabBeepIdx (scope=window만).
+  - miss 시 0으로 폴백 + log.warning.
+- duration / gap_ms / left / right는 `config.conf` 설정 (기본 50 / 15 / 50 / 50).
 
 ### 등록된 단축키
 - **NVDA+Shift+T**: 현재 창/앱 추가 (다이얼로그로 scope 선택)
