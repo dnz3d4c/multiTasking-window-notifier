@@ -90,6 +90,7 @@ from .store.io import (
     _now_iso,
     _save_to_disk,
 )
+from .store.migrations.legacy_list import _backup_legacy_list, _migrate_from_list
 from .store.migrations.normalize_titles import (
     _dedup_items,
     _mark_dirty_if_changed,
@@ -124,48 +125,6 @@ def reset_cache() -> None:
 
 # 경로/시간/메타 헬퍼와 JSON 역직렬화·원자적 저장은 `store.io`에서 관리한다.
 # 본 모듈 상단의 import 블록에서 재export한다(Phase 3.2).
-
-
-def _migrate_from_list(list_path: str) -> list:
-    """구형 `app.list` → 메타 딕셔너리 리스트.
-
-    v1 텍스트 포맷은 한 줄당 `appId|title` 또는 `title`만. title-only 줄은
-    appId가 비게 되어 `_ensure_beep_assignments`가 appBeepMap에 등록할 수 없다.
-    이런 줄은 placeholder appId("_legacy_<idx>")로 승격해 비프 할당을 받게 한다.
-    """
-    items = []
-    try:
-        with open(list_path, "r", encoding="utf-8") as f:
-            for idx, line in enumerate(f):
-                k = line.strip()
-                if not k:
-                    continue
-                meta = _new_meta(k)
-                if not meta.get("appId"):
-                    # "|" 없는 구형 줄 — splitKey가 ("", k)를 반환해 appId가 빔.
-                    # 비프 할당을 받도록 고유 placeholder appId 부여.
-                    placeholder = f"_legacy_{idx}"
-                    new_key = makeKey(placeholder, k)
-                    log.warning(
-                        f"mtwn: legacy title-only entry {k!r} promoted to "
-                        f"placeholder appId={placeholder!r}"
-                    )
-                    meta = _new_meta(new_key)
-                items.append(meta)
-    except Exception:
-        log.error(f"mtwn: app.list migration load failed path={list_path}", exc_info=True)
-        return []
-    return items[:MAX_ITEMS]
-
-
-def _backup_legacy_list(list_path: str) -> None:
-    if not os.path.exists(list_path):
-        return
-    try:
-        os.replace(list_path, _bak_path(list_path))
-        log.info(f"mtwn: app.list backed up to {_bak_path(list_path)}")
-    except Exception:
-        log.warning("mtwn: app.list backup failed", exc_info=True)
 
 
 def _load_state(list_path: str) -> dict:
