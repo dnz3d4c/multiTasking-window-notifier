@@ -97,6 +97,7 @@ from .store.migrations.normalize_titles import (
     _normalize_items,
     _normalize_titles_in_place,
 )
+from .store.migrations.v6_to_v7_beep_reassign import clear_pre_v7_assignments
 
 # 본 모듈은 데이터 레이어다. 실패 시 `log`로만 보고하고 `ui.message`는 호출하지 않는다.
 # 사용자 대면 알림은 상위 레이어(__init__.py의 script_* 등)에서 반환값으로 판단해 처리.
@@ -209,27 +210,15 @@ def _load_state(list_path: str) -> dict:
         # 저장 실패 시 dirty 유지 → 다음 flush/save에서 재시도
 
     # ⑥ 비프 할당 마이그레이션.
-    #   - v7 파일: _ensure_beep_assignments가 누락된 항목만 채움 (no-op 또는 부분 보강).
-    #   - v6 이하 파일: 기존 할당을 모두 버리고 순차 방식으로 1회성 강제 재배정.
-    #     v6(반음 64)과 v7(온음계 35)은 테이블 크기와 주파수 의미가 동시에 바뀌어
-    #     기존 인덱스가 의미하던 음과 새 인덱스의 음이 다르다. 재할당 + 사용자의
-    #     "등록 순서대로 한 음씩 위로" 직관 모델 유지를 함께 달성.
-    #   - v5 이하도 같은 경로로 한 번에 v7까지 끌어올림.
-    #   - v3 이하(appBeepMap/tabBeepIdx 부재)도 동일 재배정 규칙으로 커버.
-    if state.get("source_version", 0) < 7:
-        if state.get("appBeepMap") or any(
-            "tabBeepIdx" in it for it in state["items"] if it.get("scope") == SCOPE_WINDOW
-        ):
-            log.info(
-                f"mtwn: migrate v{state.get('source_version', 0)}→v7, "
-                f"clearing legacy beep assignments for sequential reassignment "
-                f"in [{BEEP_USABLE_START}, {BEEP_USABLE_START + BEEP_USABLE_SIZE})"
-            )
-        state["appBeepMap"] = {}
-        for it in state["items"]:
-            if it.get("scope") == SCOPE_WINDOW and "tabBeepIdx" in it:
-                del it["tabBeepIdx"]
-        state["dirty"] = True
+    #   - v7 파일: clear_pre_v7_assignments는 no-op. _ensure_beep_assignments가 누락된
+    #     항목만 채움 (부분 보강).
+    #   - v6 이하 파일: clear_pre_v7_assignments가 기존 할당을 전부 버리고,
+    #     _ensure_beep_assignments가 순차 방식으로 1회성 재배정.
+    #     v6(반음 64)과 v7(온음계 35)은 테이블 크기/주파수 의미가 동시에 바뀌어
+    #     기존 인덱스 의미가 보존되지 않기 때문. 사용자 직관 모델("등록 순서대로
+    #     한 음씩 위로")은 clear 후 순차 재배정이 자연스럽게 유지한다.
+    #   - v5 이하 / v3 이하(appBeepMap/tabBeepIdx 부재) 모두 동일 경로로 v7까지 승격.
+    clear_pre_v7_assignments(state)
     if _ensure_beep_assignments(state):
         state["dirty"] = True
     if state["dirty"]:
