@@ -6,8 +6,14 @@
 대부분의 Ctrl+Tab 확정 전환은 event_nameChange가 foreground title 변경으로
 감지한다. 이 디스패처는 nameChange가 못 잡거나 의미가 없는 3가지 경로를 다룬다:
 
-    1) Alt+Tab 오버레이 — obj.wcn이 `ALT_TAB_OVERLAY_WCN`. obj 자신이 "선택
-       후보 창"의 name을 들고 있음.
+    1) Alt+Tab 오버레이 — obj.wcn이 `ALT_TAB_OVERLAY_WCN` AND fg.wcn이
+       `ALT_TAB_HOST_FG_WCN`. obj.wcn(InputSite)은 UWP 공용이라 단독으로는
+       Win+B 숨김 아이콘·시스템 트레이·알림 센터까지 같이 걸린다. Xaml Shell
+       호스트 fgWcn과 AND로 묶어 진짜 Alt+Tab/Win+Tab 오버레이만 진입.
+       obj 자신이 "선택 후보 창"의 name을 들고 있음. 단, 후보의 obj.appId는
+       오버레이 호스트(항상 'explorer') 값이라 실제 앱이 아니다 — 아래 매칭용
+       match_appId를 빈 문자열로 내려 Matcher가 app_lookup 조회를 스킵하게
+       한다 (title 정확 매치 + title-only 역매핑까지만 허용).
     2) 앱별 오버레이 (예: Notepad++ MRU) — fgWcn이 appId의 overlay 목록에 있음.
        obj가 리스트 항목.
     3) 에디터 자식 컨트롤 — `is_editor_class(appId, wcn) AND wcn != fg_wcn`.
@@ -28,11 +34,11 @@ from logHandler import log
 from . import settings
 from . import tabClasses
 from .appIdentity import getAppId, normalize_title
-from .constants import ALT_TAB_OVERLAY_WCN
+from .constants import ALT_TAB_HOST_FG_WCN, ALT_TAB_OVERLAY_WCN
 
 
 def dispatch(plugin, obj) -> None:
-    """obj가 3분기 중 하나에 해당하면 raw_title/tab_sig 뽑아 matcher로 위임."""
+    """obj가 3분기 중 하나에 해당하면 raw_title/tab_sig/appId 뽑아 matcher로 위임."""
     if settings.get("debugLogging"):
         _log_focus_diag(obj)
 
@@ -47,11 +53,11 @@ def dispatch(plugin, obj) -> None:
     match_source = _determine_match_source(obj, wcn, appId, fg, fg_wcn)
     if match_source is None:
         return
-    raw_title, tab_sig = match_source
+    raw_title, tab_sig, match_appId = match_source
     title = normalize_title(raw_title)
     if not title:
         return
-    plugin._match_and_beep(appId, title, tab_sig=tab_sig)
+    plugin._match_and_beep(match_appId, title, tab_sig=tab_sig)
 
 
 def _log_focus_diag(obj) -> None:
@@ -84,8 +90,16 @@ def _log_focus_diag(obj) -> None:
 
 
 def _determine_match_source(obj, wcn, appId, fg, fg_wcn):
-    """3분기 판정. 매칭 대상이면 (raw_title, tab_sig), 아니면 None."""
-    in_alt_tab     = wcn == ALT_TAB_OVERLAY_WCN
+    """3분기 판정. 매칭 대상이면 (raw_title, tab_sig, match_appId), 아니면 None.
+
+    match_appId는 Matcher에 넘길 **신뢰 가능한** appId. Alt+Tab 분기에서는
+    obj.appId가 오버레이 호스트(='explorer')라 무의미하므로 빈 문자열로 내려
+    app_lookup 조회를 스킵시킨다. 나머지 분기는 원래 appId 그대로.
+    """
+    # Alt+Tab: obj.wcn(InputSite)은 UWP 공용이라 fg.wcn(Xaml Shell 호스트)과
+    # AND로 묶어야 Win+B/트레이/알림센터 등 "같은 껍데기를 쓰는 목록형 UI"를 배제.
+    in_alt_tab     = (wcn == ALT_TAB_OVERLAY_WCN
+                      and fg_wcn == ALT_TAB_HOST_FG_WCN)
     in_app_overlay = tabClasses.is_overlay_class(appId, fg_wcn)
     in_tab_editor  = (tabClasses.is_editor_class(appId, wcn)
                       and wcn != fg_wcn)
@@ -112,4 +126,9 @@ def _determine_match_source(obj, wcn, appId, fg, fg_wcn):
         tab_sig = int(getattr(sig_obj, "windowHandle", 0) or 0)
     except Exception:
         tab_sig = 0
-    return raw_title, tab_sig
+
+    # Alt+Tab 분기: obj.appId='explorer'는 오버레이 호스트. 후보의 실제 앱이
+    # 아니므로 빈 문자열로 넘겨 Matcher가 app_lookup을 스킵하게 한다.
+    # (title 정확 매치 + title-only 역매핑까지만 허용)
+    match_appId = "" if in_alt_tab else appId
+    return raw_title, tab_sig, match_appId

@@ -249,3 +249,33 @@ def test_title_only_reverse_mapping_uses_real_app_beep(plugin, monkeypatch):
     # 메타가 정확히 "notepad|Memo" entry에 기록되었는지 확인
     meta = appListStore.get_meta(plugin.appListFile, "notepad|Memo")
     assert meta["switchCount"] == 1
+
+
+def test_empty_appid_skips_app_lookup(plugin, monkeypatch):
+    """appId=""로 들어오면 app_lookup 조회가 스킵되어 오탐이 차단된다.
+
+    Alt+Tab 오버레이 후보의 obj.appId는 항상 오버레이 호스트('explorer')라
+    focusDispatcher가 빈 문자열로 Matcher에 내린다. 사용자가 explorer를
+    SCOPE_APP으로 등록했어도, 등록 안 된 후보 창의 title만 들고 오면
+    어떤 매칭도 이뤄지지 않아야 한다. 본 Phase의 핵심 회귀 방지.
+    """
+    _seed(plugin, [("explorer", SCOPE_APP)])
+    calls = _capture_beeps(monkeypatch)
+
+    # Alt+Tab 후보인데 title이 등록 목록에 없음 → 무음이어야 함.
+    plugin._match_and_beep("", "등록 안 된 창 제목")
+
+    assert calls == []
+
+
+def test_empty_appid_still_honors_title_reverse_mapping(plugin, monkeypatch):
+    """appId=""여도 title-only 역매핑은 유지되어야 Alt+Tab 후보가 등록 창이면 비프."""
+    from globalPlugins.multiTaskingWindowNotifier.constants import BEEP_USABLE_START
+
+    _seed(plugin, [("notepad|Memo", SCOPE_WINDOW)])
+    calls = _capture_beeps(monkeypatch)
+
+    # Alt+Tab 오버레이 경로 모사: appId는 "" (호스트 무효화), title은 등록된 창.
+    plugin._match_and_beep("", "Memo")
+
+    assert calls == [(BEEP_USABLE_START, BEEP_USABLE_START, SCOPE_WINDOW)]

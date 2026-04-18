@@ -15,7 +15,10 @@ from unittest.mock import MagicMock
 import pytest
 
 from globalPlugins.multiTaskingWindowNotifier import focusDispatcher
-from globalPlugins.multiTaskingWindowNotifier.constants import ALT_TAB_OVERLAY_WCN
+from globalPlugins.multiTaskingWindowNotifier.constants import (
+    ALT_TAB_HOST_FG_WCN,
+    ALT_TAB_OVERLAY_WCN,
+)
 
 
 def _make_obj(wcn="", name="", hwnd=0x1000, appName=""):
@@ -76,20 +79,43 @@ def test_dispatch_none_obj_is_noop(captured_match, mock_api, tab_classes_noop, d
 
 
 def test_alt_tab_overlay_uses_obj_name(captured_match, mock_api, tab_classes_noop, debug_off):
-    """wcn==ALT_TAB_OVERLAY_WCN이면 obj.name을 raw title로 사용."""
+    """Alt+Tab 진입은 (obj.wcn AND fg.wcn) 두 축 AND. obj.name을 raw title로 사용.
+
+    후보 창의 obj.appId는 오버레이 호스트('explorer')라 무의미하므로 빈 문자열로
+    Matcher에 전달되어 app_lookup 조회를 자동 스킵한다.
+    """
     plugin, calls = captured_match
     obj = _make_obj(wcn=ALT_TAB_OVERLAY_WCN, name="YouTube - Chrome", hwnd=0xAAA, appName="chrome")
-    fg = _make_obj(wcn="Chrome_WidgetWin_1", name="Chrome", hwnd=0xBBB, appName="chrome")
+    fg = _make_obj(wcn=ALT_TAB_HOST_FG_WCN, name="작업 전환", hwnd=0xBBB, appName="explorer")
     mock_api(fg)
 
     focusDispatcher.dispatch(plugin, obj)
 
-    # normalize_title은 꼬리 " - Chrome"을 제거 (appId=chrome).
+    # normalize_title은 꼬리 " - Chrome"을 제거. match_appId는 "" (신뢰 불가 표시).
     assert len(calls) == 1
     appId, title, tab_sig = calls[0]
-    assert appId == "chrome"
+    assert appId == ""  # Alt+Tab 분기: app_lookup 조회 억제용 빈 문자열
     assert title == "YouTube"
     assert tab_sig == 0xAAA  # alt_tab 분기는 obj.windowHandle
+
+
+def test_alt_tab_overlay_skipped_when_fg_not_shell_host(
+    captured_match, mock_api, tab_classes_noop, debug_off
+):
+    """obj.wcn이 InputSite여도 fg.wcn이 Xaml Shell 호스트가 아니면 Alt+Tab 분기 미진입.
+
+    Win+B 숨김 아이콘·시스템 트레이·알림 센터처럼 같은 UWP InputSite 껍데기를
+    쓰는 다른 목록형 UI에서 오탐이 나지 않아야 한다. 본 Phase의 핵심 회귀 방지.
+    """
+    plugin, calls = captured_match
+    # Win+B 시나리오: obj.wcn은 InputSite, fg.wcn은 시스템 트레이/탐색기 등.
+    obj = _make_obj(wcn=ALT_TAB_OVERLAY_WCN, name="카카오톡", hwnd=0xD001, appName="explorer")
+    fg = _make_obj(wcn="Shell_TrayWnd", name="작업 표시줄", hwnd=0xD000, appName="explorer")
+    mock_api(fg)
+
+    focusDispatcher.dispatch(plugin, obj)
+
+    assert calls == []
 
 
 def test_app_overlay_uses_obj_name(captured_match, mock_api, monkeypatch, debug_off):

@@ -100,9 +100,19 @@ def test_alt_tab_overlay_triggers_beep_via_title_fallback(plugin, monkeypatch):
     # Alt+Tab 오버레이의 전형적 appName. 대상 앱(notepad)과 다르다.
     focus.appModule.appName = "explorer"
 
+    # Alt+Tab 오버레이 호스트(Xaml Shell)의 fg. Phase 1 이후 진입 판정이 이
+    # fg.wcn까지 AND로 요구한다 — 없으면 Win+B 등 다른 목록형 UI로 오인되지
+    # 않도록 분기 자체가 차단됨.
+    fg = MagicMock()
+    fg.windowClassName = "XamlExplorerHostIslandWindow"
+    fg.name = "작업 전환"
+    fg.appModule = MagicMock()
+    fg.appModule.appName = "explorer"
+
     import api
 
     api.getFocusObject.return_value = focus
+    api.getForegroundObject.return_value = fg
 
     from globalPlugins.multiTaskingWindowNotifier import beepPlayer
 
