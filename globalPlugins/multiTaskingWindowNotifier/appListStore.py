@@ -270,13 +270,33 @@ def _normalize_titles_in_place(state: dict) -> bool:
 
 
 def _load_state(list_path: str) -> dict:
-    """캐시를 우선 반환. 캐시 미스 시 JSON → app.list 마이그레이션 순으로 로드."""
+    """캐시를 우선 반환. 캐시 미스 시 아래 선형 단계로 상태 복원.
+
+    입력: 사용자가 넘긴 `app.list` 경로.
+    실제 저장은 같은 디렉터리의 `app.json` (내부 `_json_path` 변환).
+
+    단계:
+      ① 캐시 체크
+      ② 경로 결정(list_path → json_path)
+      ③ JSON 로드 또는 legacy `app.list` 마이그레이션
+      ④ legacy 백업 — 신뢰 가능한 JSON이 확보된 경우만 1회
+      ⑤ title normalize 마이그레이션 ("제목 없음 - 메모장" → "제목 없음")
+      ⑥ 캐시 등록
+    """
+    # ① 캐시
     if list_path in _states:
         return _states[list_path]
 
     state = {"items": [], "dirty": False, "corrupted": False}
+    # ② 경로 결정
     json_path = _json_path(list_path)
 
+    # ③ JSON 로드 또는 legacy 마이그레이션.
+    # json_trustworthy: 이 로드 사이클에서 app.json이 source of truth로 확보됐는가.
+    #   - JSON 존재 + 정상 로드: True (과거 마이그레이션에서 백업만 누락됐던 케이스 정리 대상)
+    #   - JSON 없음 + app.list 마이그레이션 후 save 성공: True (표준 백업 타이밍)
+    #   - JSON 손상 / save 실패 / 아무 파일도 없음: False (legacy 보존)
+    json_trustworthy = False
     if os.path.exists(json_path):
         loaded = _load_from_json(json_path)
         if loaded is None:
@@ -290,21 +310,26 @@ def _load_state(list_path: str) -> dict:
             # state["items"]는 기본값 [] 유지. dirty=False도 유지(손상을 덮어쓰지 않도록).
         else:
             state["items"] = loaded
-            # 정상 로드 시에만 지연 백업: 과거 마이그레이션에서 저장은 성공했으나
-            # 백업은 실패했던 경우 app.json과 app.list가 공존할 수 있다. 이번에 정리.
-            if os.path.exists(list_path):
-                _backup_legacy_list(list_path)
+            json_trustworthy = True
     elif os.path.exists(list_path):
         # 구형 app.list 마이그레이션
-        state["items"] = _migrate_from_list(list_path)
-        if state["items"]:
+        migrated = _migrate_from_list(list_path)
+        if migrated:
+            state["items"] = migrated
             state["dirty"] = True
             if _save_to_disk(list_path, state):
                 state["dirty"] = False
-                _backup_legacy_list(list_path)
+                json_trustworthy = True
             # 저장 실패 시 dirty 유지 → 다음 flush에서 재시도
 
-    # title normalize 마이그레이션: "제목 없음 - 메모장" → "제목 없음".
+    # ④ legacy 백업 — JSON이 신뢰 가능한 상태로 확보된 뒤 1회.
+    # 과거 2곳에 흩어져 있던 호출을 여기로 모았다. 손상/save 실패 경로는
+    # json_trustworthy=False라 자연스럽게 스킵되며, legacy 파일이 없는 케이스도
+    # os.path.exists 가드로 no-op.
+    if json_trustworthy and os.path.exists(list_path):
+        _backup_legacy_list(list_path)
+
+    # ⑤ title normalize 마이그레이션: "제목 없음 - 메모장" → "제목 없음".
     # corrupted(state["items"]==[])는 변경이 없어 자연스럽게 통과. 정상 로드/legacy
     # 마이그레이션 결과 모두에 적용된다. 변경이 있으면 디스크에 영구화.
     if _normalize_titles_in_place(state):
@@ -312,6 +337,7 @@ def _load_state(list_path: str) -> dict:
             state["dirty"] = False
         # 저장 실패 시 dirty 유지 → 다음 flush/save에서 재시도
 
+    # ⑥ 캐시 등록
     _states[list_path] = state
     return state
 
