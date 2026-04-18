@@ -104,14 +104,16 @@ def test_alt_tab_overlay_triggers_beep_via_title_fallback(plugin, monkeypatch):
 
     api.getFocusObject.return_value = focus
 
-    import globalPlugins.multiTaskingWindowNotifier as pkg
+    from globalPlugins.multiTaskingWindowNotifier import beepPlayer
 
     called = []
 
     def fake_beep(app_idx, tab_idx=None, scope=None, **kwargs):
         called.append((app_idx, tab_idx, scope))
 
-    monkeypatch.setattr(pkg, "play_beep", fake_beep)
+    # matcher가 호출 시점에 beepPlayer.play_beep를 lookup하므로 모듈 속성
+    # 교체로 가로챈다.
+    monkeypatch.setattr(beepPlayer, "play_beep", fake_beep)
 
     plugin.event_gainFocus(focus, lambda: None)
 

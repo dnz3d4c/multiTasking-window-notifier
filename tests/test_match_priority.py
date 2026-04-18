@@ -35,14 +35,16 @@ def plugin(monkeypatch, tmp_path):
 
 def _capture_beeps(monkeypatch):
     """play_beep 호출을 캡처하는 fake 설치. v4 시그니처 (app_idx, tab_idx, scope)."""
-    import globalPlugins.multiTaskingWindowNotifier as pkg
+    from globalPlugins.multiTaskingWindowNotifier import beepPlayer
 
     calls = []
 
     def fake(app_idx, tab_idx=None, scope=None, **kwargs):
         calls.append((app_idx, tab_idx, scope))
 
-    monkeypatch.setattr(pkg, "play_beep", fake)
+    # matcher가 호출 시점에 beepPlayer.play_beep를 lookup하므로
+    # 모듈 속성 교체만으로 캡처 가능.
+    monkeypatch.setattr(beepPlayer, "play_beep", fake)
     return calls
 
 

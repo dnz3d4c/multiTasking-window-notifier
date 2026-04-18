@@ -18,16 +18,16 @@ from logHandler import log
 from scriptHandler import script
 
 from .constants import ADDON_NAME, ALT_TAB_OVERLAY_WCN, MAX_ITEMS, SCOPE_APP, SCOPE_WINDOW
-from .appIdentity import getAppId, makeKey, makeAppKey, normalize_title, splitKey
+from .appIdentity import getAppId, makeAppKey, normalize_title
 from . import appListStore
 from . import settings
 from . import tabClasses
 from .windowInfo import config_addon_dir, get_current_window_info
-from .beepPlayer import play_beep
 from .listDialog import AppListDialog
 from .settingsPanel import MultiTaskingSettingsPanel
 from .switchFlusher import FlushScheduler
 from .lookupIndex import LookupIndex
+from .matcher import Matcher
 
 # 번역 초기화(선택)
 try:
@@ -73,12 +73,9 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
         self._rebuild_lookup()
         # 전환 카운트 디바운스 저장: switchFlusher가 카운터/타이머 상태 캡슐화.
         self._flush_scheduler = FlushScheduler(appListStore.flush, self.appListFile)
-        # 시그니처 기반 dedup — (appId, title, tab_sig)가 연속으로 같으면 skip.
-        # 확정 탭 전환은 title 또는 tab_sig(hwnd)가 바뀌므로 자연 통과하고,
-        # 같은 탭 자식 컨트롤 재진입 같은 이벤트 중복 폭주만 흡수한다.
-        # 시간 기반 가드는 쓰지 않는다 — "같은 제목 다른 탭"을 key만 보고 잘라내는
-        # 부작용(메모장 '제목 없음' 여러 개, 빠른 탭 왕복)이 드러나 제거했다.
-        self._last_event_sig = None
+        # 매칭 + 비프 재생 + 시그니처 dedup 캡슐화. dedup 상태(_last_event_sig)는
+        # Matcher.last_event_sig에 있으며 아래 property로 테스트 호환 유지.
+        self._matcher = Matcher(self)
 
         # 손상된 app.json을 만났을 때 한 번만 사용자에게 안내.
         # ui.delayedMessage는 부팅 시 UI 변화에 묻히지 않도록 NVDA가 제공하는
@@ -131,101 +128,20 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
         """appList 변경 시 lookup 재구성. 실제 로직은 LookupIndex.rebuild."""
         self._lookup.rebuild(self.appList)
 
-    def _resolve_beep_pair(self, matched_key, scope, appId):
-        """v4 (app_idx, tab_idx) 쌍 결정.
+    # ---- matcher 위임 (테스트 호환 + 기존 호출부 유지) ----
 
-        Returns:
-            tuple: (app_idx, tab_idx_or_none).
-                - scope=app: (appBeepMap[real_appId], None). 단음 재생.
-                - scope=window: (appBeepMap[real_appId], entry.tabBeepIdx). 2음 재생.
+    @property
+    def _last_event_sig(self):
+        """호환용 pass-through. 실제 소유자는 Matcher."""
+        return self._matcher.last_event_sig
 
-        title 역매핑 케이스(Alt+Tab 오버레이에서 obj.appId='explorer'로 들어왔는데
-        정작 등록된 entry는 'notepad|Memo')에 대비해 호출 인자 `appId` 대신
-        matched_key에서 추출한 real_app_id로 appBeepMap을 조회한다.
-
-        appBeepMap이나 tabBeepIdx가 미설정인 드문 케이스는 0으로 폴백해 무음은
-        피한다(할당은 _ensure_beep_assignments가 보장하지만 race 방어).
-        """
-        if scope == SCOPE_APP:
-            real_app_id = matched_key
-        else:
-            real_app_id, _ = splitKey(matched_key)
-        app_idx = appListStore.get_app_beep_idx(self.appListFile, real_app_id)
-        if app_idx is None:
-            # _ensure_beep_assignments가 모든 등록 appId에 할당하므로 정상 흐름에선
-            # miss가 뜨지 않는다. 뜬다면 캐시 정합성 버그 신호 → warning.
-            log.warning(
-                f"mtwn: appBeepMap miss appId={real_app_id!r} — falling back to 0"
-            )
-            app_idx = 0
-        if scope == SCOPE_APP:
-            return app_idx, None
-        # SCOPE_WINDOW
-        tab_idx = appListStore.get_tab_beep_idx(self.appListFile, matched_key)
-        if tab_idx is None:
-            log.warning(
-                f"mtwn: tabBeepIdx miss key={matched_key!r} — falling back to 0"
-            )
-            tab_idx = 0
-        return app_idx, tab_idx
+    @_last_event_sig.setter
+    def _last_event_sig(self, value):
+        self._matcher.last_event_sig = value
 
     def _match_and_beep(self, appId, title, tab_sig=0):
-        """공통 매칭 루틴. 이벤트 훅(event_gainFocus / event_nameChange)이
-        매칭 소스를 결정한 뒤 호출.
-
-        매칭 우선순위:
-            1. windowLookup 정확 매치 (key=appId|title) → 창 비프
-            2. windowLookup title-only 역매핑 → 창 비프 (Alt+Tab 오버레이 호환)
-            3. appLookup (appId) → 앱 비프
-            4. 미스 → no-op
-
-        Args:
-            tab_sig: 탭/창 구분용 이벤트 식별자(보통 obj.windowHandle). 시그니처
-                dedup sig에 포함되어 같은 (appId, title)이라도 다른 탭이면 통과
-                시킨다. 0은 hwnd 미확보 상태 — 탭 구분 없는 기존 동작과 동치.
-        """
-        key = makeKey(appId, title)
-
-        matched_key = None
-        scope = None
-        if key in self.windowLookup:
-            matched_key, scope = key, SCOPE_WINDOW
-        elif title in self.windowLookup:
-            # title 역매핑 → 실제 entry 문자열로 변환 (record_switch는 entry 키가 필요)
-            idx = self.windowLookup[title]
-            matched_key, scope = self.appList[idx], SCOPE_WINDOW
-        elif appId in self.appLookup:
-            matched_key, scope = appId, SCOPE_APP
-
-        if matched_key is None:
-            return
-
-        # 시그니처 dedup: (appId, title, tab_sig) 동일이면 skip.
-        # tab_sig(hwnd)는 호출부에서 분기별로 추출. 같은 탭 자식 컨트롤 재진입은
-        # hwnd 동일 → skip. Ctrl+Tab으로 다른 탭이 되면 hwnd 달라 통과. 시간 개념
-        # 없이 "직전 이벤트와 완전 동일한가"만 보기 때문에 빠른 탭 왕복(A→B→A)도
-        # 중간 B에서 sig가 갱신되어 복귀한 A가 정상 통과한다. 단 중간 B에 대한
-        # 이벤트 자체가 누락되면(A→A만 두 번) 두 번째 A가 여기서 조용히 skip되어
-        # 사용자 관점엔 "비프 누락"으로 보인다. debugLogging 켰을 때 이 경로도
-        # 기록해서 "왜 안 울렸는지" 실측 가능하게 한다.
-        event_sig = (appId, title, tab_sig)
-        if event_sig == self._last_event_sig:
-            if settings.get("debugLogging"):
-                log.info(f"mtwn: DBG sig_guard skip sig={event_sig!r}")
-            return
-        self._last_event_sig = event_sig
-
-        app_idx, tab_idx = self._resolve_beep_pair(matched_key, scope, appId)
-        play_beep(
-            app_idx, tab_idx, scope,
-            duration=settings.get("beepDuration"),
-            gap_ms=settings.get("beepGapMs"),
-            left=settings.get("beepVolumeLeft"),
-            right=settings.get("beepVolumeRight"),
-        )
-        appListStore.record_switch(self.appListFile, matched_key)
-        self._flush_scheduler.notify_switch()
-        self._flush_scheduler.maybe_flush()
+        """공통 매칭 루틴. 실제 로직은 Matcher.match_and_beep."""
+        self._matcher.match_and_beep(appId, title, tab_sig=tab_sig)
 
     # -------- 스크립트 --------
     # 기본 제스처는 데코레이터 gesture 파라미터로 선언
