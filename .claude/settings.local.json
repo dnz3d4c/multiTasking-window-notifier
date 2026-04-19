@@ -6,7 +6,20 @@
       "Bash(touch .claude/last-review.txt)",
       "Read(//c/project/nvda-addons/multiTaskingWindowNotifier/**)",
       "Bash(mkdir -p .claude)",
-      "Bash(date)"
+      "Bash(date)",
+      "Skill(update-config)",
+      "Edit",
+      "Write",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git status)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git show:*)",
+      "Bash(git checkout:*)",
+      "Bash(date > .claude/last-review.txt)",
+      "Bash(date > *)"
     ]
   }
 }
