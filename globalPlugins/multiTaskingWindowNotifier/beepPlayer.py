@@ -15,8 +15,9 @@ v4 2차원 비프:
     - gap_ms는 NVDA `core.callLater`로 비동기 예약. 내부에서 wx.CallLater를
       거쳐 queueHandler.eventQueue로 진입하므로 NVDA 이벤트 큐와 정합성 유지.
       `event_gainFocus`를 블로킹하지 않는다.
-    - duration 기본값은 50ms. 2음 총 150ms(duration 50 + gap 100)로 v3 단음
-      100ms보다 길지만 두 음 변별을 위한 여유가 필수.
+    - settings.CONFSPEC 기본값은 duration=50ms, gap=100ms. 2음 총 150ms
+      (duration 50 + gap 100)로 v3 단음 100ms보다 길지만 두 음 변별을 위한
+      여유가 필수.
 """
 
 import tones
@@ -25,14 +26,9 @@ from logHandler import log
 
 from .constants import BEEP_TABLE, BEEP_TABLE_SIZE, SCOPE_APP, SCOPE_WINDOW
 
-# config가 미주입되거나 테스트 환경일 때 사용할 기본값.
-# 실제 런타임 값은 __init__.py에서 config.conf로 읽어 전달.
-BEEP_DURATION_MS = 50
-# 앱음과 탭음 사이 간격. 15ms(초기값) → 60ms → 100ms로 두 차례 상향.
-# 60ms에서도 "딩동" 한 덩어리처럼 뭉쳐 들린다는 실전 피드백이 있어
-# 100ms로 재조정. duration 50ms + gap 100ms = 총 150ms로 두 음이
-# 뚜렷이 "딩 … 동"으로 분리되면서도 Alt+Tab 체감 속도는 유지된다.
-BEEP_GAP_MS = 100
+# duration/gap_ms 기본값 상수는 두지 않는다. settings.CONFSPEC(settings.py)이
+# 사용자 조정 가능한 단일 SoT이며, matcher가 항상 settings.get()으로 주입한다.
+# 기본값 조정이 필요하면 settings.CONFSPEC의 default=... 한 곳만 고친다.
 
 
 def _schedule_second_beep(freq: int, duration: int, gap_ms: int) -> None:
@@ -55,10 +51,10 @@ def _schedule_second_beep(freq: int, duration: int, gap_ms: int) -> None:
 
 def play_beep(
     app_idx: int,
-    tab_idx=None,
-    scope: str = SCOPE_APP,
-    duration: int = BEEP_DURATION_MS,
-    gap_ms: int = BEEP_GAP_MS,
+    tab_idx,
+    scope: str,
+    duration: int,
+    gap_ms: int,
 ) -> None:
     """앱 비프 a + (옵션) 탭 비프 b 재생.
 

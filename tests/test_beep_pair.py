@@ -82,7 +82,8 @@ def test_scope_window_without_tab_idx_is_single_beep(mock_tones, mock_call_later
 
 def test_app_idx_out_of_range_is_silent(mock_tones, mock_call_later):
     """app_idx 범위 밖이면 경고 로그 + 무음."""
-    beepPlayer.play_beep(999, tab_idx=0, scope=SCOPE_WINDOW)
+    beepPlayer.play_beep(999, tab_idx=0, scope=SCOPE_WINDOW,
+                         duration=50, gap_ms=100)
 
     assert mock_tones == []
 
@@ -101,5 +102,6 @@ def test_scope_app_does_not_schedule_second_beep(mock_tones, mock_call_later):
     """scope=app에서는 wx.CallLater가 호출되지 않아야 함."""
     # _schedule_second_beep이 wx를 import하므로 그 호출 여부로 확인.
     # 여기서는 mock_tones 길이로 간접 검증 (app은 1번만).
-    beepPlayer.play_beep(0, tab_idx=5, scope=SCOPE_APP)
+    beepPlayer.play_beep(0, tab_idx=5, scope=SCOPE_APP,
+                         duration=50, gap_ms=100)
     assert len(mock_tones) == 1
