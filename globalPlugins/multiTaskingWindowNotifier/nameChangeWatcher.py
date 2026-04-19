@@ -3,6 +3,13 @@
 
 """event_nameChange 기반 탭 확정 전환 감지.
 
+**이벤트 책임 분리** (3-way):
+    - 이 모듈(nameChangeWatcher) — "foreground 본체 title 변경" 전담.
+      foreground hwnd는 그대로인데 title bar만 갈리는 Ctrl+Tab 케이스 (Firefox,
+      Notepad++ 등).
+    - foregroundWatcher — "앱 간 전환" 전담. SCOPE_APP 매칭의 표준 진입로.
+    - focusDispatcher — "같은 앱 내 탭/자식 컨트롤 전환" 전담 (3분기).
+
 Ctrl+Tab / Ctrl+Shift+Tab 등으로 탭이 확정 전환되면 대부분 앱에서 최상위
 창의 title bar가 바뀐다. Firefox / Notepad++가 여기에 해당. 메모장처럼
 "제목 없음" 여러 탭을 동시에 쓰면 title이 안 바뀌어 이 훅으로는 구분 불가

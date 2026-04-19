@@ -184,8 +184,9 @@ multiTaskingWindowNotifier/
         ├── listDialog.py                  # 목록 표시 wx.Dialog
         ├── settings.py                    # NVDA config 스키마 (confspec)
         ├── settingsPanel.py               # NVDA 설정 > 창 전환 알림 패널
-        ├── focusDispatcher.py             # event_gainFocus 3분기 판정
-        ├── nameChangeWatcher.py           # event_nameChange 탭 확정 감지 (obj != fg 조기 컷)
+        ├── focusDispatcher.py             # event_gainFocus 3분기 판정 (같은 앱 내 탭/자식 컨트롤 전환 전담)
+        ├── nameChangeWatcher.py           # event_nameChange foreground title 변경 전담 (Ctrl+Tab 등)
+        ├── foregroundWatcher.py           # event_foreground 앱 간 전환 전담 (SCOPE_APP 표준 진입로, Phase 7)
         ├── matcher.py                     # 매칭 + 비프 재생 + 시그니처 dedup
         ├── lookupIndex.py                 # windowLookup / appLookup 재구성
         ├── switchFlusher.py               # 디바운스 flush 스케줄러
@@ -215,13 +216,22 @@ multiTaskingWindowNotifier/
   - `tones`: 비프음 재생(tones.beep)
   - `scriptHandler.script`: 단축키 등록 데코레이터
   - `addonHandler`: 번역 초기화
-- **이벤트 후킹**
-  - `event_gainFocus` 단일 경로. 3분기(Phase B):
-    1. `obj.wcn == "Windows.UI.Input.InputSite.WindowClass"` → Alt+Tab 오버레이. `obj.name`이 탭 제목.
+- **이벤트 후킹** (3-way 책임 분리, Phase 7)
+
+  | NVDA 이벤트 | 모듈 | 담당 범위 |
+  |------------|------|-----------|
+  | `event_foreground` | `foregroundWatcher` | **앱 간 전환** (foreground hwnd 변경). SCOPE_APP 매칭의 표준 진입로. NVDA가 hwnd dedup 보장하므로 같은 앱 내부 포커스 이동에는 발화 안 함. |
+  | `event_nameChange` | `nameChangeWatcher` | **foreground 본체 title 변경** (Ctrl+Tab 등). hwnd는 그대로인데 title bar만 갈리는 케이스. |
+  | `event_gainFocus` | `focusDispatcher` | **같은 앱 내 탭/자식 컨트롤 전환** (3분기). foreground hwnd 안 바뀌는 시나리오. |
+
+  `event_gainFocus` 3분기 (Phase B):
+    1. `obj.wcn == "Windows.UI.Input.InputSite.WindowClass"` → Alt+Tab 오버레이 후보 미리듣기. `obj.name`이 탭 제목.
     2. `tabClasses.is_overlay_class(appId, fgWcn)` → 앱별 오버레이(예: Notepad++ MRU `fgWcn='#32770'`). `obj.name`이 탭 제목.
     3. `tabClasses.is_editor_class(appId, obj.wcn)` → 에디터 자식 컨트롤(예: 메모장 `RichEditD2DPT`, Notepad++ `Scintilla`). `foreground.name`이 탭 제목.
-  - 각 분기의 raw title은 `normalize_title`을 거쳐 꼬리 " - 앱명" 서픽스를 제거한 뒤 매칭. appId가 복합키 1등이라 title에 앱명 중복 저장하지 않는다.
-  - 같은 키 0.3초 내 재매칭은 `_MATCH_DEDUP_SEC` 가드로 한 번만.
+
+  각 분기의 raw title은 `normalize_title`을 거쳐 꼬리 " - 앱명" 서픽스를 제거한 뒤 매칭. appId가 복합키 1등이라 title에 앱명 중복 저장하지 않는다.
+
+  같은 키 0.3초 내 재매칭은 `_MATCH_DEDUP_SEC` 가드로 한 번만.
 - **파일 저장소**
   - `store` 서브패키지(Phase 3에서 분해): 앱 목록 + 메타 JSON I/O. `store.core._states` 모듈 캐시로 상태 유지, `store.record_switch`/`store.flush`로 디바운스 저장. `store.core._load_state`에서 title normalize + v7 재배정 자동 마이그레이션 수행. I/O는 `store.io`, 비프 할당은 `store.assign`, 버전 전환은 `store.migrations`(Phase 6.3에서 단일 파일로 통합)가 담당.
   - `tabClasses` 모듈: `DEFAULT_TAB_CLASSES` 상수(메모장 editor / Notepad++ overlay)만 보유. `is_editor_class`/`is_overlay_class`가 상수 dict 조회로 응답. 과거 JSON I/O + 자동 학습 경로는 실사용 증거 0으로 제거됨 — 새 앱 추가는 소스 수정 + 재배포.

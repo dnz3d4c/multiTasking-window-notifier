@@ -3,6 +3,14 @@
 
 """event_gainFocus 3분기 판정 + 진단 로그.
 
+**이벤트 책임 분리** (3-way):
+    - 이 모듈(focusDispatcher) — "같은 앱 내 탭/자식 컨트롤 전환" 전담.
+      foreground hwnd가 안 바뀌는 케이스(Alt+Tab 후보 미리듣기 / 앱별 MRU /
+      에디터 자식 hwnd 구분)만 처리.
+    - foregroundWatcher — "앱 간 전환" 전담. SCOPE_APP 매칭의 표준 진입로.
+    - nameChangeWatcher — "foreground 본체 title 변경" 전담 (Ctrl+Tab으로
+      title bar만 갈리는 Firefox/Notepad++ 등).
+
 대부분의 Ctrl+Tab 확정 전환은 event_nameChange가 foreground title 변경으로
 감지한다. 이 디스패처는 nameChange가 못 잡거나 의미가 없는 3가지 경로를 다룬다:
 
