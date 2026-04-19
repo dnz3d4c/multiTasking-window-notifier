@@ -1,13 +1,19 @@
 # -*- coding: utf-8 -*-
 # GNU General Public License v2.0-or-later
 
-"""등록된 창/앱 목록을 보여주고 삭제까지 처리하는 wx.Dialog.
+"""등록된 창/앱 목록을 보여주고 삭제/편집까지 처리하는 wx.Dialog.
 
 Phase 3 변경:
     - scope 표시: `[앱] chrome` / `[창] chrome | YouTube ...`
     - 다중 선택(`wx.LB_EXTENDED`) + Delete 키/삭제 버튼으로 일괄 삭제
     - 앱 entry 삭제 시 "관련 창도 같이 지울까요?" 확인 다이얼로그
     - 실제 저장/lookup 갱신은 호출자가 주입한 on_delete 콜백 책임 (결합도 낮춤)
+
+Phase 7 변경 (v8 aliases):
+    - 표시 텍스트에 alias 꼬리표 `(대체: 링키지접근성)` 추가 (alias 있을 때만).
+    - "편집(&E)" 버튼 추가 — 단일 선택 + on_edit_alias 콜백 주입 시에만 노출.
+    - 메타 조회 콜백을 `get_scope(entry) -> str`에서 `get_meta(entry) -> dict`로
+      확장. 기존 호출부 호환을 위해 `get_scope`도 여전히 수용.
 """
 
 import wx
@@ -30,18 +36,26 @@ except Exception:
 # ---- wx 없이 단위 테스트 가능한 순수 함수(Phase 4.2) ----
 
 
-def format_display_text(entry: str, scope: str) -> str:
+def format_display_text(entry: str, scope: str, aliases=None) -> str:
     """ListBox 1줄 표시 텍스트. scope별 프리픽스 + 가독성 좋은 appId|title 포맷.
 
     scope=app은 entry 자체가 appId. scope=window는 splitKey로 분해. appId가
     비어 있는 구형 entry는 "앱 미지정" 라벨로 폴백 — wx 의존성 없이 단위
     테스트 가능하도록 module-level로 추출했다.
+
+    aliases가 비어 있지 않으면 꼬리에 `(대체: a1, a2)`를 붙인다. Phase 7
+    UI 규약상 alias는 1개만 저장하지만 포맷은 배열 전체 지원.
     """
     if scope == SCOPE_APP:
-        return f"[앱] {entry}"
-    appId, title = splitKey(entry)
-    appLabel = appId if appId else "앱 미지정"
-    return f"[창] {appLabel} | {title}"
+        base = f"[앱] {entry}"
+    else:
+        appId, title = splitKey(entry)
+        appLabel = appId if appId else "앱 미지정"
+        base = f"[창] {appLabel} | {title}"
+    alias_list = [a for a in (aliases or []) if a]
+    if alias_list:
+        base += f" (대체: {', '.join(alias_list)})"
+    return base
 
 
 def format_count_text(n: int) -> str:
@@ -81,20 +95,37 @@ class AppListDialog(wx.Dialog):
     Args:
         parent: 부모 wx 창.
         appList: 등록된 entry 키 리스트 (순서 보존).
-        get_scope: callable(entry) -> "app" | "window". GlobalPlugin._meta_for를 주입.
+        get_meta: callable(entry) -> dict. GlobalPlugin._meta_for를 주입.
+            반환 dict에서 `scope`와 `aliases`를 조회. 미존재 시 빈 dict 반환 가정.
+        get_scope: (하위 호환) callable(entry) -> scope. get_meta 미주입 시 fallback.
         on_delete: callable(entries_to_remove: list[str]) -> bool. 저장 성공 여부 반환.
             None이면 삭제 UI 비활성화 (조회 전용).
+        on_edit_alias: callable(entry: str) -> (True | False | None).
+            편집 버튼을 노출할지 결정. None이면 편집 UI 비활성화.
+            True=편집 성공(목록 갱신), False=저장 실패(에러 표시), None=사용자 취소.
     """
 
-    def __init__(self, parent, appList, get_scope=None, on_delete=None):
+    def __init__(self, parent, appList, get_meta=None, get_scope=None,
+                 on_delete=None, on_edit_alias=None):
         super().__init__(parent, title=_("등록된 창 목록"))
         self.appList = list(appList)
-        self._get_scope = get_scope or (lambda e: SCOPE_WINDOW)
+        # get_meta 우선, 없으면 get_scope를 어댑터로 감싸 dict로 승격.
+        if get_meta is not None:
+            self._get_meta = get_meta
+        elif get_scope is not None:
+            self._get_meta = lambda e: {"scope": get_scope(e), "aliases": []}
+        else:
+            self._get_meta = lambda e: {"scope": SCOPE_WINDOW, "aliases": []}
         self._on_delete = on_delete
+        self._on_edit_alias = on_edit_alias
         # 표시 순서: scope 무관하게 표시 텍스트 정렬. 내부 entry 매핑은 _entries에 보관.
         self._entries = sorted(self.appList, key=lambda e: self._display_text(e).lower())
         self._create_ui()
         self.CenterOnScreen()
+
+    def _get_scope(self, entry):
+        """scope만 필요한 내부/테스트 호환 헬퍼. 기존 cascade 로직 등에서 사용."""
+        return (self._get_meta(entry) or {}).get("scope", SCOPE_WINDOW)
 
     def _create_ui(self):
         # NVDA 설정 대화상자 관례: sHelper를 독립적으로 만들고 바깥 mainSizer가
@@ -119,12 +150,17 @@ class AppListDialog(wx.Dialog):
         )
         self.listBox.Bind(wx.EVT_KEY_DOWN, self._on_listbox_key)
 
-        # "선택 항목 삭제"는 다이얼로그를 닫지 않는 action 버튼이므로 addItem으로.
-        # addDialogDismissButtons는 dismiss 전용(닫기/취소 류)에만 쓰는 게 guiHelper 계약.
-        if self._on_delete is not None:
+        # "선택 항목 삭제"/"대체 제목 편집"은 다이얼로그를 닫지 않는 action 버튼이므로
+        # addItem으로. addDialogDismissButtons는 dismiss 전용(닫기/취소 류)에만 쓰는 게
+        # guiHelper 계약.
+        if self._on_delete is not None or self._on_edit_alias is not None:
             actionButtons = guiHelper.ButtonHelper(wx.HORIZONTAL)
-            self.deleteBtn = actionButtons.addButton(self, label=_("선택 항목 삭제(&D)"))
-            self.deleteBtn.Bind(wx.EVT_BUTTON, self._on_delete_button)
+            if self._on_delete is not None:
+                self.deleteBtn = actionButtons.addButton(self, label=_("선택 항목 삭제(&D)"))
+                self.deleteBtn.Bind(wx.EVT_BUTTON, self._on_delete_button)
+            if self._on_edit_alias is not None:
+                self.editBtn = actionButtons.addButton(self, label=_("대체 제목 편집(&E)"))
+                self.editBtn.Bind(wx.EVT_BUTTON, self._on_edit_button)
             sHelper.addItem(actionButtons)
 
         # dismiss 버튼(닫기)은 단일 버튼으로 addDialogDismissButtons에 전달.
@@ -141,7 +177,12 @@ class AppListDialog(wx.Dialog):
         self.EscapeId = wx.ID_OK
 
     def _display_text(self, entry: str) -> str:
-        return format_display_text(entry, self._get_scope(entry))
+        meta = self._get_meta(entry) or {}
+        return format_display_text(
+            entry,
+            meta.get("scope", SCOPE_WINDOW),
+            aliases=meta.get("aliases") or [],
+        )
 
     def _count_text(self) -> str:
         return format_count_text(len(self._entries))
@@ -158,6 +199,40 @@ class AppListDialog(wx.Dialog):
 
     def _on_delete_button(self, event):
         self._delete_selected()
+
+    def _on_edit_button(self, event):
+        self._edit_selected_alias()
+
+    def _edit_selected_alias(self):
+        """단일 선택 entry의 alias를 편집. 콜백이 저장/안내를 담당."""
+        selected = self._selected_entries()
+        if not selected:
+            wx.Bell()
+            return
+        if len(selected) > 1:
+            wx.MessageBox(
+                _("대체 제목 편집은 한 번에 한 항목만 할 수 있어요."),
+                _("안내"),
+                wx.OK | wx.ICON_INFORMATION,
+                self,
+            )
+            return
+        entry = selected[0]
+        result = self._on_edit_alias(entry)
+        if result is None:
+            # 사용자 취소 — 아무 변경 없음
+            return
+        if result is False:
+            wx.MessageBox(
+                _("저장 중 문제가 생겨 대체 제목을 바꾸지 못했어요."),
+                _("오류"),
+                wx.OK | wx.ICON_ERROR,
+                self,
+            )
+            return
+        # 성공 → 표시 텍스트 갱신 (alias 꼬리표 반영).
+        idx = self._entries.index(entry)
+        self.listBox.SetString(idx, self._display_text(entry))
 
     def _delete_selected(self):
         selected = self._selected_entries()

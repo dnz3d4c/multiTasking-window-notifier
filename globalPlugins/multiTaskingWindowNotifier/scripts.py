@@ -30,7 +30,7 @@ from logHandler import log
 from scriptHandler import script
 
 from . import store
-from .appIdentity import makeAppKey
+from .appIdentity import makeAppKey, normalize_title
 from .constants import MAX_ITEMS, SCOPE_APP, SCOPE_WINDOW
 from .listDialog import AppListDialog
 from .windowInfo import get_current_window_info
@@ -43,6 +43,46 @@ try:
 except Exception:
     def _(s):
         return s
+
+
+def _prompt_for_alias(current_alias: str = "") -> str | None:
+    """alias 입력 다이얼로그를 띄우고 결과 문자열 반환.
+
+    카카오톡처럼 Alt+Tab 오버레이 이름과 foreground 제목이 다른 앱을 단일
+    entry로 매칭하기 위한 "대체 제목" 입력창. 등록(NVDA+Shift+T) 흐름과
+    목록 다이얼로그 편집 흐름 양쪽에서 공유.
+
+    Args:
+        current_alias: 기본값으로 표시할 현재 alias. 등록 시에는 "".
+            편집 시에는 entry의 기존 aliases[0]을 넣는다.
+
+    Returns:
+        str | None:
+            - None: 사용자가 Cancel을 눌러 조작 전체를 취소.
+            - "": 확인은 눌렀지만 값이 비어 alias 없이 진행 (또는 제거).
+            - 그 외 str: 입력 원문(호출부가 normalize_title 적용).
+    """
+    gui.mainFrame.prePopup()
+    try:
+        prompt = _(
+            "이 항목이 Alt+Tab 등 다른 경로에서 다른 이름으로 들리면 입력해요.\n"
+            "예: 카카오톡은 Alt+Tab에서 '링키지접근성' 같은 대화 이름으로 보여요.\n"
+            "대체 제목이 없다면 빈 값으로 확인하면 돼요."
+        )
+        dlg = wx.TextEntryDialog(
+            gui.mainFrame,
+            prompt,
+            _("창 전환 알림 — 대체 제목"),
+            value=current_alias or "",
+        )
+        try:
+            if dlg.ShowModal() != wx.ID_OK:
+                return None
+            return dlg.GetValue().strip()
+        finally:
+            dlg.Destroy()
+    finally:
+        gui.mainFrame.postPopup()
 
 
 class ScriptsMixin:
@@ -92,7 +132,7 @@ class ScriptsMixin:
         ]
 
         def show_choice():
-            # 모달 종료 후 같은 GUI 스레드에서 즉시 _do_add 호출.
+            # 모달 종료 후 같은 GUI 스레드에서 즉시 alias 입력 → _do_add 호출.
             # CallAfter 이중으로 큐에 쌓아 음성 순서가 큐 깊이에 따라 바뀌는 것을 방지.
             gui.mainFrame.prePopup()
             dlg = wx.SingleChoiceDialog(
@@ -109,13 +149,25 @@ class ScriptsMixin:
             finally:
                 dlg.Destroy()
                 gui.mainFrame.postPopup()
-            if selected_scope is not None:
-                self._do_add(appId, title, key, selected_scope)
+            if selected_scope is None:
+                return
+            # alias(대체 제목) 입력 — scope 무관하게 동일 프롬프트. 빈 값 허용.
+            # 사용자가 Cancel하면 등록 자체 취소(앞선 scope 선택 무효화).
+            alias = _prompt_for_alias(current_alias="")
+            if alias is None:
+                return
+            self._do_add(appId, title, key, selected_scope, alias=alias)
 
         wx.CallAfter(show_choice)
 
-    def _do_add(self, appId, title, key, scope):
-        """scope 선택 후 실제 등록. GUI 스레드에서 호출."""
+    def _do_add(self, appId, title, key, scope, alias: str = ""):
+        """scope 선택 후 실제 등록. GUI 스레드에서 호출.
+
+        alias는 `_prompt_for_alias`가 반환한 정규화 전 원문. 빈 문자열이면
+        aliases=[] (기본값)으로 저장. 비어있지 않으면 normalize_title 적용
+        후 aliases=[정규화값] 1개만 저장. Phase 7 UI 규약: 한 항목당 최대
+        alias 1개.
+        """
         # 중복 체크: scope별로 나뉘므로 같은 appId여도 창 등록과 앱 등록은 공존 허용.
         if scope == SCOPE_WINDOW:
             if key in self.windowLookup:
@@ -146,13 +198,47 @@ class ScriptsMixin:
                 speechPriority=speech.Spri.NOW,
             )
             return
+
+        # alias 적용: 입력이 있으면 normalize_title로 꼬리 서픽스를 벗긴 뒤 저장.
+        # 매칭 경로(foreground/focusDispatcher/nameChange)는 모두 정규화된 title을
+        # 쓰므로 저장 시에도 같은 형태로 통일해야 역매핑이 히트한다.
+        normalized_alias = normalize_title(alias) if alias else ""
+        if normalized_alias:
+            if not store.set_aliases(self.appListFile, new_key, [normalized_alias]):
+                # alias 저장 실패 — 본 등록은 성공했으므로 롤백하지 않음.
+                # 사용자에게 경고만. listDialog 편집으로 재시도 가능.
+                ui.message(
+                    "추가는 됐는데 대체 제목을 저장하지 못했어요. "
+                    "목록 다이얼로그에서 다시 시도해 주세요.",
+                    speechPriority=speech.Spri.NOW,
+                )
+                log.warning(
+                    f"mtwn: set_aliases failed after add key={new_key!r} alias={normalized_alias!r}"
+                )
         self._rebuild_lookup()
 
+        # 사용자 알림: scope 알림 먼저, alias 있으면 별도 줄로 이어서.
+        # f-string에 사용자 데이터를 조사 템플릿으로 박지 않고 ": " 경계로
+        # 분리해 NVDA 발화 호흡을 확보.
         if scope == SCOPE_APP:
-            ui.message(f"앱 전체로 추가했어요: {appId}", speechPriority=speech.Spri.NEXT)
+            ui.message(
+                "앱 전체로 추가했어요: %s" % appId,
+                speechPriority=speech.Spri.NEXT,
+            )
         else:
-            ui.message(f"창으로 추가했어요: {appId} | {title}", speechPriority=speech.Spri.NEXT)
-        log.info(f"mtwn: add succeeded scope={scope!r} key={new_key!r} total={len(self.appList)}")
+            ui.message(
+                "창으로 추가했어요: %s | %s" % (appId, title),
+                speechPriority=speech.Spri.NEXT,
+            )
+        if normalized_alias:
+            ui.message(
+                "대체 제목도 저장했어요: %s" % normalized_alias,
+                speechPriority=speech.Spri.NEXT,
+            )
+        log.info(
+            f"mtwn: add succeeded scope={scope!r} key={new_key!r} "
+            f"alias={normalized_alias!r} total={len(self.appList)}"
+        )
 
     @script(
         description=_("Remove current window title from notifier list"),
@@ -227,8 +313,9 @@ class ScriptsMixin:
             dlg = AppListDialog(
                 gui.mainFrame,
                 self.appList,
-                get_scope=self._meta_for,
+                get_meta=self._meta_for,
                 on_delete=self._delete_entries_from_dialog,
+                on_edit_alias=self._edit_alias_from_dialog,
             )
             dlg.ShowModal()
             dlg.Destroy()
@@ -258,4 +345,53 @@ class ScriptsMixin:
             speechPriority=speech.Spri.NEXT,
         )
         log.info(f"mtwn: dialog bulk delete count={len(entries)} total={len(self.appList)}")
+        return True
+
+    def _edit_alias_from_dialog(self, entry: str) -> bool | None:
+        """목록 다이얼로그에서 단일 항목의 alias 편집 호출.
+
+        TextEntryDialog로 현재 alias를 기본값으로 보여주고 입력받아
+        `store.set_aliases`로 즉시 저장. 빈 값 확인 시 alias 제거.
+
+        Returns:
+            True: 편집 성공 (alias 설정/변경/제거).
+            False: 디스크 저장 실패. listDialog가 에러 메시지 표시.
+            None: 사용자가 Cancel 눌러 변경 없음. listDialog는 아무 알림 안 함.
+        """
+        meta = self._meta_for(entry) or {}
+        current_aliases = meta.get("aliases") or []
+        current = current_aliases[0] if current_aliases else ""
+
+        new_input = _prompt_for_alias(current_alias=current)
+        if new_input is None:
+            return None  # 사용자 취소
+        normalized = normalize_title(new_input) if new_input else ""
+        # 기존 값과 정규화 결과가 같으면 no-op (불필요한 디스크 쓰기 방지)
+        if normalized == current:
+            ui.message(
+                "대체 제목에 변화가 없어 그대로 두었어요.",
+                speechPriority=speech.Spri.NEXT,
+            )
+            return True
+
+        new_aliases = [normalized] if normalized else []
+        if not store.set_aliases(self.appListFile, entry, new_aliases):
+            return False
+        self._rebuild_lookup()
+        if normalized:
+            # 사용자 입력을 조사(`'...'(으)로`) 템플릿에 박지 않고 ": " 경계로
+            # 분리해 발화 품질 확보. 기존 "추가/삭제했어요" 메시지 톤과 일치.
+            ui.message(
+                "대체 제목을 바꿨어요: %s" % normalized,
+                speechPriority=speech.Spri.NEXT,
+            )
+        else:
+            ui.message(
+                "대체 제목을 지웠어요.",
+                speechPriority=speech.Spri.NEXT,
+            )
+        log.info(
+            f"mtwn: alias edited entry={entry!r} "
+            f"{current!r} → {normalized!r}"
+        )
         return True
