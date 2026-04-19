@@ -233,27 +233,34 @@ multiTaskingWindowNotifier/
 
   같은 키 0.3초 내 재매칭은 `_MATCH_DEDUP_SEC` 가드로 한 번만.
 - **파일 저장소**
-  - `store` 서브패키지(Phase 3에서 분해): 앱 목록 + 메타 JSON I/O. `store.core._states` 모듈 캐시로 상태 유지, `store.record_switch`/`store.flush`로 디바운스 저장. `store.core._load_state`에서 title normalize + v7 재배정 자동 마이그레이션 수행. I/O는 `store.io`, 비프 할당은 `store.assign`, 버전 전환은 `store.migrations`(Phase 6.3에서 단일 파일로 통합)가 담당.
+  - `store` 서브패키지(Phase 3에서 분해): 앱 목록 + 메타 JSON I/O. `store.core._states` 모듈 캐시로 상태 유지, `store.record_switch`/`store.flush`로 디바운스 저장. `store.core._load_state`에서 title normalize + v7 재배정 + v8 aliases 주입 자동 마이그레이션 수행. I/O는 `store.io`, 비프 할당은 `store.assign`, 버전 전환은 `store.migrations`(Phase 6.3에서 단일 파일로 통합, Phase 8에서 `ensure_aliases_v8` 추가)가 담당. `store.set_aliases(path, key, [str])`로 단일 entry의 alias를 즉시 원자 저장.
   - `tabClasses` 모듈: `DEFAULT_TAB_CLASSES` 상수(메모장 editor / Notepad++ overlay)만 보유. `is_editor_class`/`is_overlay_class`가 상수 dict 조회로 응답. 과거 JSON I/O + 자동 학습 경로는 실사용 증거 0으로 제거됨 — 새 앱 추가는 소스 수정 + 재배포.
 
 ## 데이터 포맷
 
 **저장 위치**: `%APPDATA%\nvda\multiTaskingWindowNotifier\` (Phase 5에서 이전). 과거에는 애드온 패키지 디렉토리(`%APPDATA%\nvda\addons\multiTaskingWindowNotifier\globalPlugins\multiTaskingWindowNotifier\`) 내부에 저장했으나 재설치 시 트리 교체로 데이터가 소실되는 문제가 있어 외부로 분리. portable NVDA에서는 `globalVars.appArgs.configPath`가 자동으로 portable 경로로 전환된다.
 
-### app.json (v7, 온음계 테이블로 전환)
+### app.json (v8, aliases 필드 추가)
 ```json
 {
-  "version": 7,
-  "appBeepMap": {"chrome": 0, "notepad": 1},
+  "version": 8,
+  "appBeepMap": {"chrome": 0, "notepad": 1, "kakao": 2},
   "items": [
     {"key": "chrome", "scope": "app",
-     "appId": "chrome", "title": "",
+     "appId": "chrome", "title": "", "aliases": [],
      "registeredAt": "2026-04-18T06:00:00",
      "switchCount": 0, "lastSeenAt": null},
     {"key": "notepad|제목 없음", "scope": "window",
      "appId": "notepad", "title": "제목 없음",
+     "aliases": [],
      "tabBeepIdx": 0,
      "registeredAt": "2026-04-17T20:00:00",
+     "switchCount": 0, "lastSeenAt": null},
+    {"key": "kakao|카카오톡", "scope": "window",
+     "appId": "kakao", "title": "카카오톡",
+     "aliases": ["링키지접근성"],
+     "tabBeepIdx": 0,
+     "registeredAt": "2026-04-19T12:20:00",
      "switchCount": 0, "lastSeenAt": null}
   ]
 }
@@ -266,15 +273,17 @@ multiTaskingWindowNotifier/
   - `"app"` — `appId` 단독 키. 같은 appId의 어떤 창/탭이든 fallback으로 a 단음.
 - **appBeepMap** (v4 신설, top-level): `{appId: BEEP_TABLE idx}`. 같은 appId의 모든 scope=window entry가 앱 비프(a)로 공유. scope=app entry가 없어도 자동 할당되어 모든 등록 appId가 base 음을 보유.
 - **tabBeepIdx** (v4 신설, scope=window entry 전용): 같은 appId 내에서 고유한 탭 비프(b) 인덱스. v7 이론 조합 앱 35 × 탭 35 = 1225.
+- **aliases** (v8 신설, scope=window/app 양쪽): 대체 제목 배열. 카카오톡처럼 Alt+Tab 오버레이 이름("링키지접근성")과 foreground title("카카오톡")이 다른 앱을 단일 entry로 매칭하기 위한 보조 키. UI는 현재 최대 1개만 입력받지만 데이터 타입은 배열로 확장 여지 보존. `lookupIndex`에서 각 alias를 windowLookup에 setdefault로 역매핑 주입. scope=app entry의 alias는 Alt+Tab 오버레이(match_appId="" 경로) 매칭을 위해 필수.
 - **할당 알고리즘** (v6 전환): `_assign_next_idx` — 등록 순서 기반 순차. appBeepMap은 앱 등록 순서대로 BEEP_USABLE_START부터 0, 1, 2, ... 한 슬롯씩 상승(v7 기준 도→레→미 …). tabBeepIdx는 appId별 독립 카운터로 각 앱마다 0부터. 중간 gap은 재사용하지 않고 항상 max+1. 포화 시 구간 내 wrap + log.warning.
 - **메타 필드**
   - `key` / `appId` / `title` — scope=app은 title이 빈 문자열
   - `registeredAt` / `switchCount` / `lastSeenAt` — 등록/사용 메타
-- **title 정규화** (Phase B): 등록 시점(`windowInfo.get_current_window_info`)과 로드 시점(`store.core._load_state`) 모두 `normalize_title`을 거쳐 꼬리 " - 앱명" 한 덩이 제거.
-- **v6 → v7 자동 마이그레이션**: 반음 64음 테이블(v6)에서 C major 온음계 35음(v7)으로 교체되며 인덱스 의미 자체가 달라진다. 로드 시 기존 appBeepMap/tabBeepIdx를 전부 버리고 순차 재배정 후 `version=7`로 저장. 1회성, 사용자는 주파수 재학습 필요.
-- **v5 이하 자동 마이그레이션**: 거리 최대화 방식(v4/v5)도 동일 경로로 한 번에 v7까지 끌어올려 재배정.
-- **v3 이하 자동 마이그레이션**: appBeepMap/tabBeepIdx 필드가 부재하면 동일 재배정 경로로 v7 할당 채움.
-- **v2 → v3 → v7 자동 마이그레이션**: scope 필드 누락 시 `"window"`로 보정 후 v7 할당까지 연쇄 진행.
+- **title 정규화** (Phase B): 등록 시점(`windowInfo.get_current_window_info`)과 로드 시점(`store.core._load_state`) 모두 `normalize_title`을 거쳐 꼬리 " - 앱명" 한 덩이 제거. alias도 등록/편집 시점에 동일 정규화 적용.
+- **v7 → v8 자동 마이그레이션**: 로드 시 모든 entry에 `aliases=[]` 주입 후 `version=8` 저장. 비프 재배정 없음 (단순 필드 확장).
+- **v6 → v7 자동 마이그레이션**: 반음 64음 테이블(v6)에서 C major 온음계 35음(v7)으로 교체되며 인덱스 의미 자체가 달라진다. 로드 시 기존 appBeepMap/tabBeepIdx를 전부 버리고 순차 재배정. 이어서 v7→v8 aliases 주입까지 한 번에 처리. 1회성, 사용자는 주파수 재학습 필요.
+- **v5 이하 자동 마이그레이션**: 거리 최대화 방식(v4/v5)도 동일 경로로 한 번에 v8까지 끌어올려 재배정.
+- **v3 이하 자동 마이그레이션**: appBeepMap/tabBeepIdx 필드가 부재하면 동일 재배정 경로로 v8 할당 + aliases 채움.
+- **v2 → v3 → v8 자동 마이그레이션**: scope 필드 누락 시 `"window"`로 보정 후 v8까지 연쇄 진행.
 
 ### 앱별 탭 컨트롤 매핑 (`tabClasses.py`의 상수)
 
@@ -322,10 +331,10 @@ DEFAULT_TAB_CLASSES = {
 - duration / gap_ms는 `config.conf` 설정 (기본 50 / 100). gap_ms는 15→60→100ms로 두 차례 상향 — 60ms에서도 두 음이 한 덩어리로 뭉쳐 들린다는 피드백 후 재조정. 좌/우 채널 볼륨 옵션은 v7 이후 제거(항상 50/50로 운용 → tones SDK 기본값과 동치).
 
 ### 등록된 단축키
-- **NVDA+Shift+T**: 현재 창/앱 추가 (다이얼로그로 scope 선택)
+- **NVDA+Shift+T**: 현재 창/앱 추가 (scope 선택 → 대체 제목(alias) 입력 다이얼로그)
 - **NVDA+Shift+D**: 현재 창/앱 삭제 (정확 매치만, 창>앱 우선)
 - **NVDA+Shift+R**: 목록 파일 새로고침
-- **NVDA+Shift+I**: 등록 목록 다이얼로그 (다중 선택, Delete 키, 앱 일괄 삭제 확인)
+- **NVDA+Shift+I**: 등록 목록 다이얼로그 (다중 선택, Delete 키, 앱 일괄 삭제 확인, 단일 선택 시 "대체 제목 편집(&E)" 버튼)
 
 ## 코딩 패턴
 - **에러 처리**: try-except로 파일 I/O 오류 처리, ui.message로 사용자에게 알림
@@ -419,10 +428,10 @@ DEFAULT_TAB_CLASSES = {
   - 비프 톤은 같은 appId 창들끼리 같은 base 주파수를 공유하고 등록 순서만큼 반음씩 위로 변주(`beepPlayer.play_beep`).
   - 탭 전환은 `event_gainFocus` 단일 경로. Phase B에서 3분기(Alt+Tab 오버레이 / 앱별 오버레이 / 에디터 자식 컨트롤)로 확장 + 모든 title은 `normalize_title` 통과.
 - **단축키 변화**:
-  - NVDA+Shift+T: 다이얼로그로 "이 창만/이 앱 전체" 선택.
+  - NVDA+Shift+T: 다이얼로그로 "이 창만/이 앱 전체" 선택 + 대체 제목(alias) 입력.
   - NVDA+Shift+D: 정확 매치(창 키 또는 앱 키)만 삭제 — 다른 앱의 동일 title 창 오삭제 방지
-  - NVDA+Shift+I: 다중 선택 + Delete 키, 앱 항목 일괄 삭제 시 같은 appId 창 동반 삭제 확인
-- **데이터 포맷**: `app.json` v7. app.json title은 Phase B에서 정규화된 형태로 저장(기존 데이터는 load 시 자동 마이그레이션). 앱별 editor/overlay wcn은 `tabClasses.py` 상수.
+  - NVDA+Shift+I: 다중 선택 + Delete 키, 앱 항목 일괄 삭제 시 같은 appId 창 동반 삭제 확인. 단일 선택 시 "대체 제목 편집(&E)" 버튼.
+- **데이터 포맷**: `app.json` v8. app.json title은 Phase B에서 정규화된 형태로 저장(기존 데이터는 load 시 자동 마이그레이션). 앱별 editor/overlay wcn은 `tabClasses.py` 상수. Phase 8에서 scope=window/app 양쪽 entry에 `aliases` 배열 필드 추가 — foreground title과 Alt+Tab 오버레이 이름이 다른 앱(카카오톡: "카카오톡" vs "링키지접근성") 매칭 지원.
 
 ### 11. Ctrl+Tab 탭 전환 시 탭별 비프 🎹 (Phase B 구현 완료)
 - **목적**: Alt+Tab뿐 아니라 Ctrl+Tab으로 앱 내부 탭을 전환할 때도 등록된 탭마다 다른 비프.
