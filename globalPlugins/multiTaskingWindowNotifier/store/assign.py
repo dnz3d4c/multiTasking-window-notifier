@@ -14,7 +14,7 @@
     - 중간 gap은 재사용하지 않고 항상 max+1. 포화 시 구간 내 wrap + log.warning.
 
 비담당:
-    - I/O (store.io), 마이그레이션 (store.migrations.*), 핫 패스 (store.core).
+    - I/O (store.io), 마이그레이션 (store.migrations), 핫 패스 (store.core).
 """
 
 from logHandler import log

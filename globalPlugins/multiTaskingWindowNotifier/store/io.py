@@ -11,7 +11,7 @@
     - 원자적 저장 (`_save_to_disk`) — `.tmp` → `os.replace`
 
 비담당:
-    - 마이그레이션 (store.migrations.*)
+    - 마이그레이션 (store.migrations)
     - 비프 인덱스 할당 (store.assign)
     - 핫 패스 API (store.core)
 

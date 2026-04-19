@@ -46,12 +46,10 @@
 path 인자는 기존 `app.list` 경로를 그대로 받는다. 내부에서 같은 디렉터리의
 `app.json`으로 변환해 사용하므로 호출부는 수정 불필요.
 
-책임 분리 (Phase 3):
+책임 분리 (Phase 3, migrations는 Phase 6.3에서 단일 파일로 통합):
     - store.io: 경로/시간/메타 헬퍼 + JSON I/O + 원자적 저장
     - store.assign: 순차 비프 인덱스 할당
-    - store.migrations.legacy_list: app.list → JSON
-    - store.migrations.normalize_titles: title 정규화 + dedup
-    - store.migrations.v6_to_v7_beep_reassign: v7 재배정 clear
+    - store.migrations: app.list 마이그레이션 / title 정규화 + dedup / v7 재배정 clear
     - 본 모듈: 위 레이어를 엮는 핫 패스 API와 `_load_state` 선형 파이프라인.
 """
 
@@ -66,9 +64,12 @@ from ..constants import (
 )
 from .assign import _ensure_beep_assignments
 from .io import _json_path, _load_from_json, _new_meta, _now_iso, _save_to_disk
-from .migrations.legacy_list import _backup_legacy_list, _migrate_from_list
-from .migrations.normalize_titles import _normalize_titles_in_place
-from .migrations.v6_to_v7_beep_reassign import clear_pre_v7_assignments
+from .migrations import (
+    _backup_legacy_list,
+    _migrate_from_list,
+    _normalize_titles_in_place,
+    clear_pre_v7_assignments,
+)
 
 # 본 모듈은 데이터 레이어다. 실패 시 `log`로만 보고하고 `ui.message`는 호출하지 않는다.
 # 사용자 대면 알림은 상위 레이어(__init__.py의 script_* 등)에서 반환값으로 판단해 처리.

@@ -177,10 +177,7 @@ multiTaskingWindowNotifier/
         │   ├── core.py                    # _load_state + 11개 공개 API 본체
         │   ├── io.py                      # JSON I/O + 원자적 저장
         │   ├── assign.py                  # 순차 비프 인덱스 할당
-        │   └── migrations/                # 버전별 마이그레이션 (1파일 = 1버전 전환)
-        │       ├── legacy_list.py         # ③ app.list → JSON
-        │       ├── normalize_titles.py    # ⑤ title 정규화 + dedup
-        │       └── v6_to_v7_beep_reassign.py  # ⑥ v7 재배정 clear
+        │   └── migrations.py              # app.list → JSON / title 정규화·dedup / v6→v7 clear 통합 (Phase 6.3)
         ├── tabClasses.py                  # 앱별 editor/overlay wcn 매핑 (상수 조회 전용)
         ├── windowInfo.py                  # 창 정보·경로 헬퍼 (title normalize 적용)
         ├── beepPlayer.py                  # v4 2음 비프 (core.callLater 기반 gap 예약)
@@ -226,7 +223,7 @@ multiTaskingWindowNotifier/
   - 각 분기의 raw title은 `normalize_title`을 거쳐 꼬리 " - 앱명" 서픽스를 제거한 뒤 매칭. appId가 복합키 1등이라 title에 앱명 중복 저장하지 않는다.
   - 같은 키 0.3초 내 재매칭은 `_MATCH_DEDUP_SEC` 가드로 한 번만.
 - **파일 저장소**
-  - `store` 서브패키지(Phase 3에서 분해): 앱 목록 + 메타 JSON I/O. `store.core._states` 모듈 캐시로 상태 유지, `store.record_switch`/`store.flush`로 디바운스 저장. `store.core._load_state`에서 title normalize + v7 재배정 자동 마이그레이션 수행. I/O는 `store.io`, 비프 할당은 `store.assign`, 버전 전환은 `store.migrations.*`가 담당.
+  - `store` 서브패키지(Phase 3에서 분해): 앱 목록 + 메타 JSON I/O. `store.core._states` 모듈 캐시로 상태 유지, `store.record_switch`/`store.flush`로 디바운스 저장. `store.core._load_state`에서 title normalize + v7 재배정 자동 마이그레이션 수행. I/O는 `store.io`, 비프 할당은 `store.assign`, 버전 전환은 `store.migrations`(Phase 6.3에서 단일 파일로 통합)가 담당.
   - `tabClasses` 모듈: `DEFAULT_TAB_CLASSES` 상수(메모장 editor / Notepad++ overlay)만 보유. `is_editor_class`/`is_overlay_class`가 상수 dict 조회로 응답. 과거 JSON I/O + 자동 학습 경로는 실사용 증거 0으로 제거됨 — 새 앱 추가는 소스 수정 + 재배포.
 
 ## 데이터 포맷
