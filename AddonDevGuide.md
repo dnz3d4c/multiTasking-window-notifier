@@ -272,6 +272,28 @@ wx.CallAfter(show_dialog)
 - **소문자 사용**: `"kb:nvda+shift+t"` (대문자 NVDA 아님)
 - **수정자 순서**: control > shift > alt > nvda
 - **예시**: `"kb:control+shift+nvda+a"`
+- NVDA `inputCore.normalizeGestureIdentifier`가 `.lower()`로 정규화하므로(`inputCore.py:914-930`) 대/소문자는 기능 동등이지만 **프로젝트 내 일관성**을 위해 소문자로 통일.
+
+### 이벤트 훅 표준 패턴
+애드온의 `event_*` 훅은 항상 아래 4요소를 갖춘다:
+
+```python
+def event_gainFocus(self, obj, nextHandler):
+    try:
+        # 훅 본문은 별도 모듈로 위임 — __init__.py는 진입점만 담당
+        focusDispatcher.dispatch(self, obj)
+    except Exception:
+        log.exception("mtwn: event_gainFocus failed")
+    finally:
+        nextHandler()  # NVDA 이벤트 체인 유지 — 예외가 나도 반드시 호출
+```
+
+- `try/except + finally` 구조로 애드온 예외가 NVDA 체인을 끊지 못하게 차단.
+- `nextHandler()`는 `finally`에 배치 — 본문 예외와 무관하게 호출 보장.
+- 본문 로직은 전용 모듈(`focusDispatcher`, `nameChangeWatcher` 등)로 위임해 훅 자체는 가볍게.
+
+### core.callLater 신뢰 조건
+`core.callLater`(`NVDA/source/core.py:1187-1202`)는 `wx.GetApp() is None`일 때만 `NVDANotInitializedError`를 던진다. `GlobalPlugin.__init__`이 호출되는 시점엔 wx.App이 반드시 존재하므로 실패 경로가 실질적으로 닫힌다. NVDA 자체 코드(`core.py:783, 975`)도 try/except 없이 사용한다. **애드온이 `wx.CallLater` → 동기 호출 같은 다단 폴백을 구성하는 건 과잉 방어**. 상위 훅의 try/except + finally가 이미 예외를 흡수한다.
 
 ### 에러 처리
 ```python
@@ -288,6 +310,7 @@ except Exception as e:
 - `event_gainFocus`는 매우 빈번하게 호출됨 → 파일 I/O 금지
 - 목록 검색은 딕셔너리 사용 (O(1))
 - `desktop.children` 순회는 느릴 수 있음 → 캐싱 고려
+- 매칭 dedup은 **이벤트 내용**(appId/title/hwnd) 기반으로. 시간 가드(예: "0.3초 내 재매칭 skip")는 근본 원인을 가리기만 할 뿐 NVDA가 쏘는 이벤트 볼륨을 줄이지 못한다.
 
 ---
 

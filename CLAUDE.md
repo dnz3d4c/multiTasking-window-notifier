@@ -339,7 +339,26 @@ DEFAULT_TAB_CLASSES = {
 - NVDA 추가 기능은 전역에서 실행되므로 예외 처리 필수
 - `event_gainFocus`는 모든 포커스 전환마다 호출되므로 성능 고려 (파일 I/O 금지)
 - `nextHandler()` 호출 필수 (이벤트 체인 유지)
-- 최대 항목 수(64) 제한 준수
+- 최대 항목 수(128) 제한 준수 — `constants.MAX_ITEMS`
+
+### NVDA가 이미 보장하는 조건을 재방어하지 않는다 (Phase R 교훈)
+
+코드 작성/리뷰 전에 "NVDA가 이미 처리하는가?"를 먼저 확인. 중복 방어는 코드 복잡도만 올리고 실제 버그 숨김 원인이 된다.
+
+- `core.callLater` — `wx.GetApp() is None`일 때만 `NVDANotInitializedError`를 던진다(`NVDA/source/core.py:1187-1202`). `GlobalPlugin` 실행 시점엔 wx.App이 반드시 존재하므로 실패 경로 닫힘. NVDA 자체(`core.py:783, 975`)도 try/except 없이 쓴다. 3단 폴백(`wx.CallLater` → 동기 호출) 구성은 과잉 방어.
+- Gesture identifier — `inputCore.normalizeGestureIdentifier`가 모든 입력을 `.lower()`로 정규화(`NVDA/source/inputCore.py:914-930`). `"kb:NVDA+..."`와 `"kb:nvda+..."`는 기능 동등. 대소문자 분기 처리 불필요. 프로젝트 규약은 소문자(AddonDevGuide.md L272).
+- `event_foreground` ↔ `event_gainFocus` 중복 — `eventHandler.doPreGainFocus`가 앱 간 전환 시 두 이벤트를 발화(`NVDA/source/eventHandler.py:349-410`). 같은 `obj`의 중복은 `IAccessibleHandler/orderedWinEventLimiter`가 최신 1개만 유지(`orderedWinEventLimiter.py:60-68`). 애드온 수준에서 시간 기반 가드(예: "0.3초 내 재매칭 skip")는 불필요 — 이벤트 내용(appId, title, tab_sig) 비교로 dedup 충분.
+- `event_nameChange`는 NVDA 자체 throttle 없음. 애드온이 `obj.windowHandle != fg.windowHandle`처럼 이벤트 내용 기반 조기 컷을 직접 걸어야 하는 경우는 예외 — 이 경우도 시간 가드가 아니라 "이벤트 식별자" 기반으로.
+
+원칙 요약: **시간 가드로 증상을 가리지 말고 이벤트 식별자/내용으로 근본 분기**. 애드온의 dedup은 "같은 이벤트 중복 흡수"용이지 "NVDA가 빠르게 쏘는 이벤트 죽이기"용이 아니다.
+
+### 단일 SoT 유지 (Phase R4b 교훈)
+
+같은 기본값을 두 곳에 쓰면 값 변경 시 한쪽을 빠뜨린다. 이번 리팩토링에서 `beepPlayer.BEEP_DURATION_MS/BEEP_GAP_MS`와 `settings.CONFSPEC`의 default가 이중 SoT였다. **`settings.CONFSPEC`이 사용자 조정 가능한 런타임 SoT라면 모듈 시그니처 default는 두지 않는다** — 필수 인자로 받아 호출부(matcher)가 항상 `settings.get()` 주입.
+
+### 실사용 없는 예비 코드는 남기지 않는다 (Phase R3 교훈, YAGNI)
+
+"이후 기능 대비"로 남겨둔 함수(`prune_stale`)가 런타임 호출 0건으로 여러 Phase를 넘겼다. 실제 착수 시점엔 신규 설계 가능성이 높아 오히려 방해가 된다. 공개 API 표면은 "현재 실제로 쓰는 것"과 일치시키고, 과거 구현이 필요하면 git log로 복원한다.
 
 ## 기능 아이디어
 ### 1. 즉시 실행 기능 ⚡
