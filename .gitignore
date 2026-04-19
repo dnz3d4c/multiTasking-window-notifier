@@ -17,3 +17,6 @@ backup_installed_addon_*.zip
 tmp_merged_app.list
 tmp_preserve_app.json
 *.nvda-addon
+
+# 커버리지 산출물
+.coverage
