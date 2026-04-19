@@ -24,6 +24,7 @@ from .matcher import Matcher
 from .scripts import ScriptsMixin
 from . import focusDispatcher
 from . import nameChangeWatcher
+from . import foregroundWatcher
 
 # 번역 초기화(선택)
 try:
@@ -160,5 +161,20 @@ class GlobalPlugin(ScriptsMixin, globalPluginHandler.GlobalPlugin):
             nameChangeWatcher.handle(self, obj)
         except Exception:
             log.exception("mtwn: event_nameChange failed")
+        finally:
+            nextHandler()
+
+    def event_foreground(self, obj, nextHandler):
+        """foreground 윈도우 전환 시 1회 발화. NVDA가 hwnd dedup 보장.
+
+        SCOPE_APP 매칭의 표준 진입로. obj는 새 foreground 본체로 appId 신뢰 가능.
+        같은 앱 내 포커스 이동에는 발화하지 않음 → 내부 메뉴/버튼 클릭 폭주 자동 차단.
+
+        try/except + finally로 nextHandler() 보장은 다른 훅과 동일 패턴.
+        """
+        try:
+            foregroundWatcher.handle(self, obj)
+        except Exception:
+            log.exception("mtwn: event_foreground failed")
         finally:
             nextHandler()
