@@ -17,10 +17,7 @@ import time
 
 from logHandler import log
 
-
-# 기본 디바운스 임계치. GlobalPlugin이 필요 시 생성자 kwargs로 조정.
-DEFAULT_FLUSH_EVERY_N = 10
-DEFAULT_FLUSH_INTERVAL_SEC = 30
+from .constants import FLUSH_EVERY_N_DEFAULT, FLUSH_INTERVAL_SEC_DEFAULT
 
 
 class FlushScheduler:
@@ -38,8 +35,8 @@ class FlushScheduler:
         flush_fn,
         app_list_file: str,
         *,
-        every_n: int = DEFAULT_FLUSH_EVERY_N,
-        interval_sec: int = DEFAULT_FLUSH_INTERVAL_SEC,
+        every_n: int = FLUSH_EVERY_N_DEFAULT,
+        interval_sec: int = FLUSH_INTERVAL_SEC_DEFAULT,
     ):
         self._flush_fn = flush_fn
         self._app_list_file = app_list_file

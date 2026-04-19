@@ -56,3 +56,9 @@ ALT_TAB_OVERLAY_WCN = "Windows.UI.Input.InputSite.WindowClass"
 # fg.wcn == ALT_TAB_HOST_FG_WCN) 두 축 AND로 묶어 오탐을 배제한다.
 # Windows 11 Xaml Shell 고정값. 로케일 독립.
 ALT_TAB_HOST_FG_WCN = "XamlExplorerHostIslandWindow"
+
+# 디바운스 flush 임계치. __init__.py가 FlushScheduler를 kwargs 없이 생성하므로
+# 실제 런타임 정책값이 이 두 상수다. GlobalPlugin이 필요 시 생성자 kwargs로
+# 덮어쓸 수 있고, 향후 사용자 조정 옵션화도 이 상수를 기준으로 확장.
+FLUSH_EVERY_N_DEFAULT = 10
+FLUSH_INTERVAL_SEC_DEFAULT = 30
