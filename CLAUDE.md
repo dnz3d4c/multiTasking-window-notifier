@@ -356,7 +356,7 @@ DEFAULT_TAB_CLASSES = {
 
 - `core.callLater` — `wx.GetApp() is None`일 때만 `NVDANotInitializedError`를 던진다(`NVDA/source/core.py:1187-1202`). `GlobalPlugin` 실행 시점엔 wx.App이 반드시 존재하므로 실패 경로 닫힘. NVDA 자체(`core.py:783, 975`)도 try/except 없이 쓴다. 3단 폴백(`wx.CallLater` → 동기 호출) 구성은 과잉 방어.
 - Gesture identifier — `inputCore.normalizeGestureIdentifier`가 모든 입력을 `.lower()`로 정규화(`NVDA/source/inputCore.py:914-930`). `"kb:NVDA+..."`와 `"kb:nvda+..."`는 기능 동등. 대소문자 분기 처리 불필요. 프로젝트 규약은 소문자(AddonDevGuide.md L272).
-- `event_foreground` ↔ `event_gainFocus` 중복 — `eventHandler.doPreGainFocus`가 앱 간 전환 시 두 이벤트를 발화(`NVDA/source/eventHandler.py:349-410`). 같은 `obj`의 중복은 `IAccessibleHandler/orderedWinEventLimiter`가 최신 1개만 유지(`orderedWinEventLimiter.py:60-68`). 애드온 수준에서 시간 기반 가드(예: "0.3초 내 재매칭 skip")는 불필요 — 이벤트 내용(appId, title, tab_sig) 비교로 dedup 충분.
+- `event_foreground` ↔ `event_gainFocus` 중복 — `eventHandler.doPreGainFocus`가 앱 간 전환 시 두 이벤트를 발화(`NVDA/source/eventHandler.py:349-410`). 같은 `obj`의 중복은 `IAccessibleHandler/orderedWinEventLimiter`가 최신 1개만 유지(`orderedWinEventLimiter.py:60-68`). 애드온 수준에서 시간 기반 가드(예: "0.3초 내 재매칭 skip")는 불필요 — 이벤트 내용(appId, title, tab_sig) 비교로 dedup 충분. 부수 현상: debugLogging ON 시 앱 간 전환마다 `foregroundWatcher` 라인 직후 `focusDispatcher gF` 라인이 페어로 찍히는 건 이 연쇄 발화 때문이며 정상이다. 파생 gainFocus는 focusDispatcher의 3분기(alt_tab/app_overlay/editor)에 거의 불일치하므로 matcher 진입 없이 진단 로그만 남는다(비프 중복 아님). Chrome/CEF 임베디드 앱(Spotify, Slack 등)은 obj가 최상위 창이 아니라 내부 `Chrome_RenderWidgetHostHWND` 자식 컨트롤로 들어와 그 컨트롤의 role/name이 로그에 노출된다.
 - `event_nameChange`는 NVDA 자체 throttle 없음. 애드온이 `obj.windowHandle != fg.windowHandle`처럼 이벤트 내용 기반 조기 컷을 직접 걸어야 하는 경우는 예외 — 이 경우도 시간 가드가 아니라 "이벤트 식별자" 기반으로.
 
 원칙 요약: **시간 가드로 증상을 가리지 말고 이벤트 식별자/내용으로 근본 분기**. 애드온의 dedup은 "같은 이벤트 중복 흡수"용이지 "NVDA가 빠르게 쏘는 이벤트 죽이기"용이 아니다.
