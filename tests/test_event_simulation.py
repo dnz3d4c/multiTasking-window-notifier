@@ -29,6 +29,7 @@ from configobj import ConfigObj
 
 from globalPlugins.multiTaskingWindowNotifier import (
     focusDispatcher,
+    foregroundWatcher,
     nameChangeWatcher,
     store,
 )
@@ -252,3 +253,113 @@ def test_child_control_reentry_does_not_double_beep(
 
     assert len(beep_calls) == 1
     assert len(record_calls) == 1
+
+
+# ---------------- Phase 7: event_foreground 회귀 그물 ----------------
+# foregroundWatcher.handle은 NVDA가 event_foreground를 발화한 시점에 호출되며
+# obj는 새 foreground 본체다. 같은 fg hwnd 내부 포커스 이동에는 NVDA가 발화
+# 자체를 안 하므로 dedup은 NVDA 책임. 우리 모듈은 호출만 들어오면 무조건
+# matcher로 위임한다 — 이 점을 테스트 시 가정.
+
+
+def test_event_foreground_fires_app_scope_beep_for_unmapped_app(
+    plugin, beep_calls, record_calls
+):
+    """SCOPE_APP만 등록된 앱(예: Spotify)으로 foreground 전환 시 단음 발화.
+
+    focusDispatcher 3분기는 모두 미스이지만 foregroundWatcher가 직접
+    matcher로 위임 → app_lookup hit → SCOPE_APP 단음. 이게 막힌 게 Phase 7
+    이전의 핵심 버그였다.
+    """
+    keys = ["spotify"]
+    scopes = {"spotify": SCOPE_APP}
+    store.save(plugin.appListFile, keys, scopes=scopes)
+    plugin.appList = list(keys)
+    plugin._rebuild_lookup()
+
+    fg = _obj(wcn="Chrome_WidgetWin_1", name="Spotify Premium",
+              hwnd=0x9001, appName="spotify")
+
+    foregroundWatcher.handle(plugin, fg)
+
+    assert len(beep_calls) == 1
+    assert beep_calls[0][1] is None  # tab_idx=None (단음)
+    assert beep_calls[0][2] == SCOPE_APP
+    assert record_calls == ["spotify"]
+
+
+def test_event_foreground_window_match_takes_priority_over_app(
+    plugin, beep_calls, record_calls
+):
+    """KakaoTalk 같이 SCOPE_APP + SCOPE_WINDOW 혼합 등록 시 창 정확 매치 우선.
+
+    matcher의 우선순위는 window 정확 → window title-only → app_lookup.
+    동일 fg.name이 window 키와 정확 일치하면 SCOPE_WINDOW 비프(2음).
+    SCOPE_APP fallback은 발화 안 함.
+    """
+    keys = ["kakaotalk", "kakaotalk|메인 채팅"]
+    scopes = {"kakaotalk": SCOPE_APP, "kakaotalk|메인 채팅": SCOPE_WINDOW}
+    store.save(plugin.appListFile, keys, scopes=scopes)
+    plugin.appList = list(keys)
+    plugin._rebuild_lookup()
+
+    fg = _obj(wcn="EVA_Window_Dblclk", name="메인 채팅",
+              hwnd=0xA001, appName="kakaotalk")
+
+    foregroundWatcher.handle(plugin, fg)
+
+    assert len(beep_calls) == 1
+    assert beep_calls[0][2] == SCOPE_WINDOW
+    assert record_calls == ["kakaotalk|메인 채팅"]
+
+
+def test_event_foreground_unregistered_app_no_beep(
+    seeded_plugin, beep_calls, record_calls
+):
+    """등록 안 된 앱으로 foreground 전환 시 무음. matcher miss로 자연 종료."""
+    fg = _obj(wcn="UnknownApp", name="Some Random Window",
+              hwnd=0xB001, appName="unknownapp")
+
+    foregroundWatcher.handle(seeded_plugin, fg)
+
+    assert beep_calls == []
+    assert record_calls == []
+
+
+def test_alt_tab_overlay_then_foreground_both_fire(
+    plugin, beep_calls, record_calls, quiet_api
+):
+    """Alt+Tab 도중 분기 1(미리듣기) + 릴리스 후 event_foreground(본 비프) 양쪽 발화.
+
+    두 이벤트는 서로 다른 sig — 분기 1은 (appId='', title=norm, hwnd=overlay),
+    foregroundWatcher는 (appId=실제, title=norm, hwnd=fg) — 이라 sig dedup이
+    흡수하지 않고 의도된 2회로 분리된다(탐색 단계 + 확정 단계).
+    """
+    keys = ["spotify"]
+    scopes = {"spotify": SCOPE_APP}
+    store.save(plugin.appListFile, keys, scopes=scopes)
+    plugin.appList = list(keys)
+    plugin._rebuild_lookup()
+    # window_lookup에도 title-only로 미리듣기가 잡히도록 SCOPE_WINDOW 별도 추가.
+    keys = ["spotify", "spotify|Spotify Premium"]
+    scopes = {"spotify": SCOPE_APP, "spotify|Spotify Premium": SCOPE_WINDOW}
+    store.save(plugin.appListFile, keys, scopes=scopes)
+    plugin.appList = list(keys)
+    plugin._rebuild_lookup()
+
+    # 1) Alt+Tab 오버레이 미리듣기 (분기 1)
+    overlay = _obj(wcn=ALT_TAB_OVERLAY_WCN, name="Spotify Premium",
+                   hwnd=0xCAFE, appName="explorer")
+    overlay_fg = _obj(wcn=ALT_TAB_HOST_FG_WCN, name="작업 전환",
+                      hwnd=0xBEEF, appName="explorer")
+    quiet_api["fg"] = overlay_fg
+    focusDispatcher.dispatch(plugin, overlay)
+
+    # 2) Alt 릴리스 후 실제 foreground 전환 (foregroundWatcher)
+    real_fg = _obj(wcn="Chrome_WidgetWin_1", name="Spotify Premium",
+                   hwnd=0x9001, appName="spotify")
+    foregroundWatcher.handle(plugin, real_fg)
+
+    # 양쪽 다 발화 — 미리듣기(window 매치) + 본 비프(window 매치, 다른 hwnd)
+    assert len(beep_calls) == 2
+    assert len(record_calls) == 2
