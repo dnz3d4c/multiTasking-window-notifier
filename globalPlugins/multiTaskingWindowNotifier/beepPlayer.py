@@ -12,7 +12,8 @@ v4 2차원 비프:
       충분히 변별된다. 이론 조합 64 × 64 = 4096.
 
 타이밍 원칙:
-    - gap_ms는 `wx.CallLater`로 비동기 예약. NVDA 메인 GUI 스레드에서 실행되며
+    - gap_ms는 NVDA `core.callLater`로 비동기 예약. 내부에서 wx.CallLater를
+      거쳐 queueHandler.eventQueue로 진입하므로 NVDA 이벤트 큐와 정합성 유지.
       `event_gainFocus`를 블로킹하지 않는다.
     - duration 기본값은 50ms. 2음 총 150ms(duration 50 + gap 100)로 v3 단음
       100ms보다 길지만 두 음 변별을 위한 여유가 필수.
@@ -37,28 +38,19 @@ BEEP_GAP_MS = 100
 def _schedule_second_beep(freq: int, duration: int, gap_ms: int) -> None:
     """gap_ms 뒤에 tones.beep을 호출한다.
 
-    우선순위:
-        ① NVDA `core.callLater` — NVDA 이벤트 큐와 정합성 보장, 메인 스레드 판별
-           자동, `wx.GetApp() is None` 가드 포함. 권장.
-        ② `wx.CallLater` — core 모듈 부재(테스트/스텁) 시 폴백.
-        ③ 동기 호출 — wx도 없을 때 (테스트 격리용). 실제 gap 없이 순차 실행.
+    NVDA `core.callLater`(core.py:1187-1202)는 `wx.GetApp() is None`일 때만
+    NVDANotInitializedError를 던지는데, GlobalPlugin이 실행되는 시점엔 wx.App이
+    반드시 존재하므로 실패 경로 없음. NVDA 자체(core.py:783, 975 등)도
+    이 함수를 try 없이 사용.
+
+    상위 이벤트 훅(`__init__.py`의 event_* 3종)이 이미 try/except로 예외를
+    흡수하지만, 컨텍스트 마커 보존을 위해 여기서도 log.exception 한 겹만 유지.
     """
     try:
         import core
         core.callLater(gap_ms, tones.beep, freq, duration)
-        return
     except Exception:
-        log.debug("mtwn: core.callLater unavailable, falling back to wx")
-    try:
-        import wx
-        wx.CallLater(gap_ms, tones.beep, freq, duration)
-        return
-    except Exception:
-        log.debug("mtwn: wx.CallLater unavailable, second beep fired synchronously")
-    try:
-        tones.beep(freq, duration)
-    except Exception:
-        log.exception("mtwn: second beep fallback failed")
+        log.exception("mtwn: second beep scheduling failed")
 
 
 def play_beep(
