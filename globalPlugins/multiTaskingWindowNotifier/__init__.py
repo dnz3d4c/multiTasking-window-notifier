@@ -16,7 +16,6 @@ from logHandler import log
 from .constants import SCOPE_WINDOW
 from . import store
 from . import settings
-from . import tabClasses
 from .windowInfo import config_addon_dir
 from .settingsPanel import MultiTaskingSettingsPanel
 from .switchFlusher import FlushScheduler
@@ -58,9 +57,9 @@ class GlobalPlugin(ScriptsMixin, globalPluginHandler.GlobalPlugin):
             log.exception("mtwn: settings init failed")
 
         self.appDir = config_addon_dir()
-        # 첫 부팅 시점에 데이터 디렉토리를 선생성해 둔다. store/tabClasses의
-        # 저장 경로(_save_to_disk)가 각자 makedirs를 수행하긴 하지만, 사용자가
-        # 수동으로 경로를 열어보거나 로그에서 참조할 때 폴더가 즉시 보이도록.
+        # 첫 부팅 시점에 데이터 디렉토리를 선생성해 둔다. store가 자체 makedirs를
+        # 수행하긴 하지만, 사용자가 수동으로 경로를 열어보거나 로그에서 참조할 때
+        # 폴더가 즉시 보이도록.
         try:
             os.makedirs(self.appDir, exist_ok=True)
         except Exception:
@@ -69,13 +68,6 @@ class GlobalPlugin(ScriptsMixin, globalPluginHandler.GlobalPlugin):
         # 초기 1회만 로드
         self.appList = store.load(self.appListFile)
 
-        # 앱별 탭 컨트롤 wcn 매핑 로드. 파일이 없으면 DEFAULT_TAB_CLASSES로 자동 생성된다.
-        # 로드 실패해도 애드온 기본 동작(Alt+Tab 매칭)은 유지되어야 하므로 예외는 삼킴.
-        self.tabClassesFile = os.path.join(self.appDir, "tabClasses.json")
-        try:
-            tabClasses.load(self.tabClassesFile)
-        except Exception:
-            log.exception("mtwn: tabClasses load failed — overlay branch disabled")
         # 매칭용 룩업 인덱스. windowLookup/appLookup 두 dict는 LookupIndex가 소유하고,
         # GlobalPlugin은 property로 read-only 노출(기존 테스트 호환).
         self._lookup = LookupIndex(meta_provider=self._meta_for)

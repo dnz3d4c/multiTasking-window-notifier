@@ -57,7 +57,7 @@ NVDA 애드온 로드 오류가 의심되면 **코드보다 설치 트리를 먼
 | 1 | `manifest.ini` 존재 | `ls %APPDATA%\nvda\addons\multiTaskingWindowNotifier\manifest.ini` | 파일 있음 |
 | 2 | 플러그인 엔트리 포인트 | `ls %APPDATA%\nvda\addons\multiTaskingWindowNotifier\globalPlugins\multiTaskingWindowNotifier\__init__.py` | 파일 있음 |
 | 3 | 소스가 루트에 박혀있지 않은지 | `ls %APPDATA%\nvda\addons\multiTaskingWindowNotifier\*.py` | 결과 **없어야** 정상 |
-| 4 | 사용자 데이터 위치 | `ls %APPDATA%\nvda\multiTaskingWindowNotifier\` | `app.json` / `tabClasses.json` 존재(애드온 실행 후). `addons\...\globalPlugins\` 내부에 이 파일들이 있으면 구 위치 — 삭제 대상 |
+| 4 | 사용자 데이터 위치 | `ls %APPDATA%\nvda\multiTaskingWindowNotifier\` | `app.json` 존재(애드온 실행 후). `addons\...\globalPlugins\` 내부에 있으면 구 위치 — 삭제 대상. (구형 `tabClasses.json`이 남아있어도 코드는 더 이상 읽지 않으므로 수동 삭제 가능하나 무시돼도 무해) |
 | 5 | 설정 섹션 생성 여부 | `grep multiTasking %APPDATA%\nvda\nvda.ini` | 섹션 헤더 보임 (애드온 최소 1회 실행 후) |
 
 3번은 "수동 복사 오타 재발" 탐지용. 설치 경로에 `__init__.py`가 루트 레벨에 있으면 즉시 깨끗이 제거하고 `.nvda-addon`으로 재설치.
@@ -67,7 +67,8 @@ NVDA 애드온 로드 오류가 의심되면 **코드보다 설치 트리를 먼
 
 - `__pycache__`, `.pytest_cache`, `.venv`, `venv`, `.git`, `tests` 디렉토리는 패키지에 포함하지 않음
 - `.pyc/.pyo/.pyd` 컴파일 산출물 제외
-- `app.list`, `app.list.bak`, `app.json`, `app.json.tmp`, `tabClasses.json`, `tabClasses.json.tmp` 런타임 사용자 데이터 제외
+- `app.list`, `app.list.bak`, `app.json`, `app.json.tmp` 런타임 사용자 데이터 제외
+- `tabClasses.json`, `tabClasses.json.tmp`는 제외 유지 (현재는 코드가 읽지 않지만 과거 파일이 배포 패키지에 섞이는 것 방지)
 - 포함 대상은 오직 `manifest.ini` + `globalPlugins/` 트리
 
 # 기본
@@ -180,7 +181,7 @@ multiTaskingWindowNotifier/
         │       ├── legacy_list.py         # ③ app.list → JSON
         │       ├── normalize_titles.py    # ⑤ title 정규화 + dedup
         │       └── v6_to_v7_beep_reassign.py  # ⑥ v7 재배정 clear
-        ├── tabClasses.py                  # 앱별 editor/overlay wcn 매핑 + 자동 학습
+        ├── tabClasses.py                  # 앱별 editor/overlay wcn 매핑 (상수 조회 전용)
         ├── windowInfo.py                  # 창 정보·경로 헬퍼 (title normalize 적용)
         ├── beepPlayer.py                  # v4 2음 비프 (core.callLater 기반 gap 예약)
         ├── listDialog.py                  # 목록 표시 wx.Dialog
@@ -201,10 +202,13 @@ multiTaskingWindowNotifier/
 ```
 %APPDATA%\nvda\multiTaskingWindowNotifier\
 ├── app.json           # 앱·창 목록 + 메타(switchCount 등). 구형 app.list는 로드 시 마이그레이션
-├── tabClasses.json    # 앱별 editor/overlay wcn. 없으면 기본값으로 자동 생성
 ├── app.list           # (구형, 있을 때만) 마이그레이션 대상
 └── app.list.bak       # (구형 마이그레이션 완료 후 보존본)
 ```
+
+참고: 과거에는 `tabClasses.json`도 이 폴더에 자동 생성됐다. JSON I/O 제거
+이후에는 `tabClasses.py`의 `DEFAULT_TAB_CLASSES` 상수만 사용하므로 디스크
+파일이 남아있어도 읽지 않는다 (수동 삭제 무해).
 
 ## 기술 스택 & 핵심 모듈
 - **NVDA API**
@@ -223,7 +227,7 @@ multiTaskingWindowNotifier/
   - 같은 키 0.3초 내 재매칭은 `_MATCH_DEDUP_SEC` 가드로 한 번만.
 - **파일 저장소**
   - `store` 서브패키지(Phase 3에서 분해): 앱 목록 + 메타 JSON I/O. `store.core._states` 모듈 캐시로 상태 유지, `store.record_switch`/`store.flush`로 디바운스 저장. `store.core._load_state`에서 title normalize + v7 재배정 자동 마이그레이션 수행. I/O는 `store.io`, 비프 할당은 `store.assign`, 버전 전환은 `store.migrations.*`가 담당.
-  - `tabClasses` 모듈: 앱별 editor/overlay wcn 세트. `load()`가 DEFAULT와 합집합 병합, `is_*_class`는 캐시 set 조회(고빈도), `learn_editor`는 등록 성공 훅에서 best-effort 호출.
+  - `tabClasses` 모듈: `DEFAULT_TAB_CLASSES` 상수(메모장 editor / Notepad++ overlay)만 보유. `is_editor_class`/`is_overlay_class`가 상수 dict 조회로 응답. 과거 JSON I/O + 자동 학습 경로는 실사용 증거 0으로 제거됨 — 새 앱 추가는 소스 수정 + 재배포.
 
 ## 데이터 포맷
 
@@ -265,21 +269,21 @@ multiTaskingWindowNotifier/
 - **v3 이하 자동 마이그레이션**: appBeepMap/tabBeepIdx 필드가 부재하면 동일 재배정 경로로 v7 할당 채움.
 - **v2 → v3 → v7 자동 마이그레이션**: scope 필드 누락 시 `"window"`로 보정 후 v7 할당까지 연쇄 진행.
 
-### tabClasses.json (v1, Phase B 신설)
-```json
-{
-  "version": 1,
-  "apps": {
-    "notepad":    {"editor": ["RichEditD2DPT"], "overlay": []},
-    "notepad++":  {"editor": ["Scintilla"],     "overlay": ["#32770"]}
-  }
+### 앱별 탭 컨트롤 매핑 (`tabClasses.py`의 상수)
+
+과거 `tabClasses.json`(v1~v2)으로 외재화했으나 JSON I/O 제거 후 코드 상수만 유지:
+
+```python
+DEFAULT_TAB_CLASSES = {
+    "notepad":   {"editor": ("RichEditD2DPT",), "overlay": ()},
+    "notepad++": {"editor": (),                 "overlay": ("#32770",)},
 }
 ```
+
 - **editor**: 탭 전환 확정 후 focus가 오는 자식 컨트롤 `windowClassName`. 이 wcn이 focus면 `foreground.name`을 탭 제목으로 매칭.
-- **overlay**: 탭 선택 오버레이 상위창의 `windowClassName` (즉 `api.getForegroundObject().windowClassName`). 이 fgWcn이면 `obj.name`을 탭 제목으로 매칭.
-- **기본값 병합**: 코드 내 `DEFAULT_TAB_CLASSES`와 합집합으로 병합. 사용자가 실수로 지워도 자동 복원.
-- **자동 학습**: `_do_add` 성공 후 `focus.wcn != fg.wcn`이면 해당 appId의 `editor`에 추가(best-effort).
-- **overlay 학습**: 이번 Phase 밖. 새 앱은 진단 로그로 fgWcn을 확인해 수동 편집.
+- **overlay**: 탭 선택 오버레이 상위창의 `windowClassName`. 이 fgWcn이면 `obj.name`을 탭 제목으로 매칭.
+- **새 앱 추가**: 소스 수정 + 재배포. 과거의 "NVDA+Shift+T 등록 시 자동 학습" 경로는 실사용 증거 0으로 제거됨.
+- **외부 JSON 없음**: 사용자 디스크에 구형 `tabClasses.json`이 남아있어도 코드가 읽지 않음(무해).
 
 ### 하위호환: app.list
 - 구형 텍스트 포맷(한 줄당 `appId|title` 또는 `title`만).
@@ -389,10 +393,10 @@ multiTaskingWindowNotifier/
   - 비프 톤은 같은 appId 창들끼리 같은 base 주파수를 공유하고 등록 순서만큼 반음씩 위로 변주(`beepPlayer.play_beep`).
   - 탭 전환은 `event_gainFocus` 단일 경로. Phase B에서 3분기(Alt+Tab 오버레이 / 앱별 오버레이 / 에디터 자식 컨트롤)로 확장 + 모든 title은 `normalize_title` 통과.
 - **단축키 변화**:
-  - NVDA+Shift+T: 다이얼로그로 "이 창만/이 앱 전체" 선택. scope=window 등록 성공 시 focus 자식 컨트롤의 wcn을 `tabClasses.json`의 editor에 자동 학습.
+  - NVDA+Shift+T: 다이얼로그로 "이 창만/이 앱 전체" 선택.
   - NVDA+Shift+D: 정확 매치(창 키 또는 앱 키)만 삭제 — 다른 앱의 동일 title 창 오삭제 방지
   - NVDA+Shift+I: 다중 선택 + Delete 키, 앱 항목 일괄 삭제 시 같은 appId 창 동반 삭제 확인
-- **데이터 포맷**: `app.json` v3 + `tabClasses.json` v1. app.json title은 Phase B에서 정규화된 형태로 저장(기존 데이터는 load 시 자동 마이그레이션).
+- **데이터 포맷**: `app.json` v7. app.json title은 Phase B에서 정규화된 형태로 저장(기존 데이터는 load 시 자동 마이그레이션). 앱별 editor/overlay wcn은 `tabClasses.py` 상수.
 
 ### 11. Ctrl+Tab 탭 전환 시 탭별 비프 🎹 (Phase B 구현 완료)
 - **목적**: Alt+Tab뿐 아니라 Ctrl+Tab으로 앱 내부 탭을 전환할 때도 등록된 탭마다 다른 비프.
