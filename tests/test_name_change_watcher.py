@@ -100,14 +100,18 @@ def test_obj_name_differs_from_fg_name_is_skipped(captured_match, mock_api, debu
     assert calls == []
 
 
-def test_empty_obj_name_is_skipped(captured_match, mock_api, debug_off):
-    """obj.name이 비어있으면 skip."""
+def test_empty_fg_name_is_skipped(captured_match, mock_api, debug_off):
+    """fg.name이 비어있으면 skip (조기 컷 통과 후 fg 제목 없음 단계).
+
+    조기 컷은 hwnd 비교이므로 obj/fg가 같은 창(hwnd 동일)이라도 통과하지만,
+    그 이후 fg.name이 empty면 매칭 위임 전에 skip. obj.name 자체는 더 이상
+    읽지 않음 (fg.name만이 탭 제목의 진실된 소스).
+    """
     plugin, calls = captured_match
-    fg = _make_obj(name="something", hwnd=0xA100, appName="chrome")
-    obj = _make_obj(name="", hwnd=0xA100, appName="chrome")
+    fg = _make_obj(name="", hwnd=0xA100, appName="chrome")
     mock_api(fg)
 
-    nameChangeWatcher.handle(plugin, obj)
+    nameChangeWatcher.handle(plugin, fg)
 
     assert calls == []
 
@@ -136,8 +140,14 @@ def test_tab_sig_uses_obj_hwnd(captured_match, mock_api, debug_off):
     assert tab_sig == 0x7777
 
 
-def test_invalid_window_handle_falls_back_to_zero(captured_match, mock_api, debug_off):
-    """windowHandle 접근이 실패해도 tab_sig=0으로 위임 진행."""
+def test_invalid_window_handle_is_cut(captured_match, mock_api, debug_off):
+    """windowHandle 접근이 실패하면 안전하게 조기 컷 (창 본체 판정 불가).
+
+    이전 구현은 tab_sig=0 폴백으로 매칭까지 진행했지만, hwnd 비교 기반 조기
+    컷에서는 판정 불가 → 보수적으로 return. 실환경에서 NVDAObject의
+    windowHandle이 예외를 던지는 건 극히 드물며, 그 상태로 매칭을 진행해봐야
+    tab_sig=0이 되어 sig_guard가 무의미해진다.
+    """
     plugin, calls = captured_match
     fg = MagicMock()
     fg.name = "Some Title - App"
@@ -149,6 +159,36 @@ def test_invalid_window_handle_falls_back_to_zero(captured_match, mock_api, debu
 
     nameChangeWatcher.handle(plugin, fg)
 
+    assert calls == []
+
+
+def test_menu_item_obj_is_cut_before_name_compare(captured_match, mock_api, debug_off):
+    """Firefox 북마크 메뉴 항목처럼 obj != fg인 이벤트는 조기 컷.
+
+    obj.name과 fg.name이 우연히 같은 문자열이어도 identity 비교가 먼저라서
+    matcher까지 가지 않는다. 실사용에서 메뉴/DOM 자식 이벤트가 여기 걸려
+    DBG 로그 노이즈도 생략된다.
+    """
+    plugin, calls = captured_match
+    fg = _make_obj(name="YouTube - Mozilla Firefox", hwnd=0x1000, appName="firefox")
+    # obj는 fg와 다른 객체지만 우연히 name이 동일 (엣지케이스)
+    menu_item = _make_obj(name="YouTube - Mozilla Firefox", hwnd=0x1001, appName="firefox")
+    mock_api(fg)
+
+    nameChangeWatcher.handle(plugin, menu_item)
+
+    assert calls == []  # 조기 컷으로 matcher 미호출
+
+
+def test_fg_identity_allows_match(captured_match, mock_api, debug_off):
+    """obj가 fg와 동일 객체면 조기 컷을 통과해 매칭까지 진행된다 (핵심 회귀 방지)."""
+    plugin, calls = captured_match
+    fg = _make_obj(name="document.txt - Notepad++", hwnd=0xC200, appName="notepad++")
+    mock_api(fg)
+
+    nameChangeWatcher.handle(plugin, fg)
+
     assert len(calls) == 1
-    _, _, tab_sig = calls[0]
-    assert tab_sig == 0
+    appId, _, tab_sig = calls[0]
+    assert appId == "notepad++"
+    assert tab_sig == 0xC200

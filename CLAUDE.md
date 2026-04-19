@@ -185,7 +185,7 @@ multiTaskingWindowNotifier/
         ├── settings.py                    # NVDA config 스키마 (confspec)
         ├── settingsPanel.py               # NVDA 설정 > 창 전환 알림 패널
         ├── focusDispatcher.py             # event_gainFocus 3분기 판정
-        ├── nameChangeWatcher.py           # event_nameChange 탭 확정 감지
+        ├── nameChangeWatcher.py           # event_nameChange 탭 확정 감지 (obj != fg 조기 컷)
         ├── matcher.py                     # 매칭 + 비프 재생 + 시그니처 dedup
         ├── lookupIndex.py                 # windowLookup / appLookup 재구성
         ├── switchFlusher.py               # 디바운스 flush 스케줄러
