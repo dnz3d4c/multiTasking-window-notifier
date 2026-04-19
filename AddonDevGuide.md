@@ -38,8 +38,8 @@
 ### 기본 제스처 바인딩
 ```python
 __gestures__ = {
-    "kb:NVDA+A": "doBeep",
-    "kb:control+NVDA+1": "sayHello"
+    "kb:nvda+a": "doBeep",
+    "kb:control+nvda+1": "sayHello"
 }
 ```
 
@@ -48,7 +48,7 @@ __gestures__ = {
 from scriptHandler import script
 
 @script(
-    gesture="kb:NVDA+A",
+    gesture="kb:nvda+a",
     description="Input help text",
     category="Category Name",
     speakOnDemand=True
@@ -392,7 +392,7 @@ def chooseNVDAObjectOverlayClasses(self, obj, clsList):
 **형식:** `source(device):modifiers+keys`
 
 **예시:**
-- `kb:NVDA+shift+v` - 키보드
+- `kb:nvda+shift+v` - 키보드
 - `br(freedomScientific):leftWizWheelUp` - 점자 디스플레이
 - `ts:tap` - 터치스크린
 - `bk:space` - 점자 키보드

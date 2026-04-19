@@ -60,7 +60,7 @@ class ScriptsMixin:
 
     @script(
         description=_("Add current window title to notifier list"),
-        gesture="kb:NVDA+shift+t",
+        gesture="kb:nvda+shift+t",
     )
     def script_addCurrentWindowTitle(self, gesture=None):
         # 등록 소스는 foreground (메모장처럼 자식 컨트롤이 focus를 받아도 활성 탭 제목 취득).
@@ -156,7 +156,7 @@ class ScriptsMixin:
 
     @script(
         description=_("Remove current window title from notifier list"),
-        gesture="kb:NVDA+shift+d",
+        gesture="kb:nvda+shift+d",
     )
     def script_removeCurrentWindowTitle(self, gesture=None):
         # 삭제 소스도 foreground (메모장 자식 컨트롤 케이스 대응).
@@ -198,7 +198,7 @@ class ScriptsMixin:
 
     @script(
         description=_("Reload app list from disk"),
-        gesture="kb:NVDA+shift+r",
+        gesture="kb:nvda+shift+r",
     )
     def script_reloadAppList(self, gesture=None):
         # reload는 미저장 변경분을 먼저 flush한 뒤 캐시 무효화 후 재로드한다.
@@ -214,7 +214,7 @@ class ScriptsMixin:
 
     @script(
         description=_("Show all registered entries"),
-        gesture="kb:NVDA+shift+i",
+        gesture="kb:nvda+shift+i",
     )
     def script_showAllEntries(self, gesture=None):
         # 파일 I/O 없이 메모리 목록 사용
