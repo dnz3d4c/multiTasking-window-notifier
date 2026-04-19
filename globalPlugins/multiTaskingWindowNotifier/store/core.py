@@ -40,8 +40,7 @@
     get_app_beep_idx(path, appId) -> int|None  appBeepMap 조회
     get_tab_beep_idx(path, key)   -> int|None  scope=window entry의 tabBeepIdx
     is_corrupted(path)       -> bool         app.json 손상 감지 플래그
-    prune_stale(path, iso)   -> list[str]    (#7 창 닫기 알림 기능 대비)
-    reset_cache()            -> None         pytest autouse fixture 전용
+    reset_cache()            -> None         pytest autouse fixture 전용 (__all__ 격리)
 
 path 인자는 기존 `app.list` 경로를 그대로 받는다. 내부에서 같은 디렉터리의
 `app.json`으로 변환해 사용하므로 호출부는 수정 불필요.
@@ -344,27 +343,3 @@ def get_tab_beep_idx(list_path: str, key: str):
                 return idx
             return None
     return None
-
-
-def prune_stale(list_path: str, before_iso: str) -> list:
-    """`lastSeenAt`이 `before_iso`보다 오래되거나 None인 항목을 제거.
-
-    Phase 2에서는 호출하지 않음. 이후 "창 닫기 알림"(#7) 기능 대비.
-    비교는 문자열 기반이지만 `_now_iso()`가 naive datetime `YYYY-MM-DDTHH:MM:SS`
-    포맷을 균일하게 쓰므로 문자열 정렬 == 시간 정렬. 타임존 표기가 섞이면 깨질
-    수 있으니 추후 tz-aware로 바꿀 때는 비교 방식도 함께 갱신.
-
-    Returns: 제거된 key 리스트.
-    """
-    state = _load_state(list_path)
-    kept, removed = [], []
-    for it in state["items"]:
-        last = it.get("lastSeenAt")
-        if last is not None and last >= before_iso:
-            kept.append(it)
-        else:
-            removed.append(it.get("key", ""))
-    if removed:
-        state["items"] = kept
-        state["dirty"] = True
-    return removed

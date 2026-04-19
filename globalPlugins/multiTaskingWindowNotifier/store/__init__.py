@@ -31,13 +31,17 @@ from .core import (
     get_tab_beep_idx,
     is_corrupted,
     load,
-    prune_stale,
     record_switch,
     reload,
-    reset_cache,
+    reset_cache,  # 내부 유틸: 테스트 전용. __all__에서 격리됨.
     save,
 )
 
+# 런타임 코드가 실제로 쓰는 9개만 공개. reset_cache는 conftest.py 등 테스트
+# 코드가 명시 import로 쓰므로 재export는 유지하되 `from store import *`의
+# 공개 표면에서는 빠진다. prune_stale은 Phase 2~6 기간 동안 Phase 8(창 닫기
+# 알림) 대비로 남아 있었으나 실사용 0건 + Phase 8 착수 시 신규 설계 가능성이
+# 높아 함수 본체/테스트와 함께 제거됨 (git log로 과거 구현 복원 가능).
 __all__ = [
     "flush",
     "get_app_beep_idx",
@@ -45,9 +49,7 @@ __all__ = [
     "get_tab_beep_idx",
     "is_corrupted",
     "load",
-    "prune_stale",
     "record_switch",
     "reload",
-    "reset_cache",
     "save",
 ]
