@@ -87,9 +87,12 @@ class Matcher:
         매칭 소스를 결정한 뒤 호출.
 
         매칭 우선순위:
-            1. windowLookup 정확 매치 (key=appId|title) → 창 비프
-            2. windowLookup title-only 역매핑 → 창 비프 (Alt+Tab 오버레이 호환)
-            3. appLookup (appId) → 앱 비프
+            1. windowLookup 정확 매치 (key=appId|title) → scope=window 2음 비프
+            2. windowLookup title-only 역매핑 → entry의 실제 scope로 재생 방식 결정
+               (v8 이후 windowLookup에는 alias를 가진 scope=app entry도 포함되므로
+               scope를 메타에서 조회해야 한다. scope=window면 2음, scope=app이면 단음)
+            3. appLookup (appId) → scope=app 단음 비프 (Alt+Tab 오버레이 분기는
+               match_appId=""를 넘기므로 이 경로에 도달 안 함)
             4. 미스 → no-op
 
         Args:
@@ -108,9 +111,15 @@ class Matcher:
         if key in window_lookup:
             matched_key, scope = key, SCOPE_WINDOW
         elif title in window_lookup:
-            # title 역매핑 → 실제 entry 문자열로 변환 (record_switch는 entry 키가 필요)
+            # title 역매핑 → 실제 entry 문자열로 변환 (record_switch는 entry 키가 필요).
+            # v8 이후 windowLookup에는 scope=window entry뿐 아니라 alias를 가진
+            # scope=app entry도 들어올 수 있으므로 entry의 실제 scope를 메타에서
+            # 조회해 결정한다. scope 하드코딩으로 SCOPE_WINDOW를 쓰면 scope=app
+            # entry가 alias로 잡혔을 때 잘못된 2음 재생이 발생.
             idx = window_lookup[title]
-            matched_key, scope = app_list[idx], SCOPE_WINDOW
+            matched_key = app_list[idx]
+            meta = plugin._meta_for(matched_key)
+            scope = meta.get("scope", SCOPE_WINDOW)
         elif appId and appId in app_lookup:
             # appId="" → Alt+Tab 오버레이 후보처럼 obj.appId가 실제 앱이 아닌 케이스.
             # focusDispatcher가 신뢰 불가 표시로 빈 문자열을 넘기므로 app_lookup skip.

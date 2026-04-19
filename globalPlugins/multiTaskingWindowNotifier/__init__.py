@@ -13,7 +13,6 @@ import gui
 import globalPluginHandler
 from logHandler import log
 
-from .constants import SCOPE_WINDOW
 from . import store
 from . import settings
 from .windowInfo import config_addon_dir
@@ -108,13 +107,17 @@ class GlobalPlugin(ScriptsMixin, globalPluginHandler.GlobalPlugin):
         super().terminate()
 
     def _meta_for(self, entry):
-        """디스크 메타에서 scope를 조회. 메타 없으면 기본 SCOPE_WINDOW로 간주.
+        """디스크 메타를 얕은 dict로 반환. 미존재 시 빈 dict.
 
-        store가 아직 로드 안 됐거나(부팅 직후) entry가 막 추가되어 메타가
-        없을 수 있다. 그런 케이스에서도 안전하게 동작하도록 fallback.
+        반환 dict는 최소 `scope`와 `aliases` 키가 있어야 호출부가 안전하게
+        동작한다. `store.get_meta`는 이미 두 필드를 포함하거나 None을
+        반환하므로 여기서는 None 방어만 한다.
+
+        호출부 (dict.get 기반 안전 접근):
+            - LookupIndex.rebuild: scope + aliases 둘 다 필요
+            - Matcher.match_and_beep: scope만 필요 (title-only 역매핑 분기)
         """
-        meta = store.get_meta(self.appListFile, entry) or {}
-        return meta.get("scope", SCOPE_WINDOW)
+        return store.get_meta(self.appListFile, entry) or {}
 
     @property
     def windowLookup(self):

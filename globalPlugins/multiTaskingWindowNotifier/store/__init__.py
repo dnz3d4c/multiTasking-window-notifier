@@ -14,14 +14,12 @@
       core.py                     # _load_state + 외부 API 본체
       io.py                       # JSON I/O + 원자적 저장
       assign.py                   # 순차 비프 인덱스 할당
-      migrations/
-        __init__.py
-        legacy_list.py            # app.list → JSON
-        normalize_titles.py       # title 정규화 + dedup
-        v6_to_v7_beep_reassign.py # v7 재배정 clear
+      migrations.py               # legacy_list / normalize_titles /
+                                  # v6→v7 clear / v7→v8 aliases 주입
+                                  # (Phase 6.3에서 서브패키지 → 단일 파일 통합)
 
-v8 이상 스키마가 필요할 때는 `migrations/v7_to_v8.py` 1파일 신설하고
-`core._load_state`에서 호출 위치를 지정한다.
+v9 이상 스키마가 필요할 때는 `migrations.py`에 함수 1개 추가 +
+`core._load_state` 파이프라인에 단계를 끼워 넣는다.
 """
 
 from .core import (
@@ -35,9 +33,10 @@ from .core import (
     reload,
     reset_cache,  # 내부 유틸: 테스트 전용. __all__에서 격리됨.
     save,
+    set_aliases,
 )
 
-# 런타임 코드가 실제로 쓰는 9개만 공개. reset_cache는 conftest.py 등 테스트
+# 런타임 코드가 실제로 쓰는 10개 공개. reset_cache는 conftest.py 등 테스트
 # 코드가 명시 import로 쓰므로 재export는 유지하되 `from store import *`의
 # 공개 표면에서는 빠진다. prune_stale은 Phase 2~6 기간 동안 Phase 8(창 닫기
 # 알림) 대비로 남아 있었으나 실사용 0건 + Phase 8 착수 시 신규 설계 가능성이
@@ -52,4 +51,5 @@ __all__ = [
     "record_switch",
     "reload",
     "save",
+    "set_aliases",
 ]

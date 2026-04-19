@@ -3,31 +3,35 @@
 
 """앱 목록 + 메타데이터 저장소 — 핫 패스 API 본체.
 
-파일 포맷 (`app.json`, version=7):
+파일 포맷 (`app.json`, version=8):
     {
-      "version": 7,
+      "version": 8,
       "appBeepMap": {"chrome": 0, "notepad": 1, ...},
       "items": [
         {"key": "appId|title", "scope": "window",
          "appId": "...", "title": "...",
+         "aliases": ["링키지접근성"],
          "tabBeepIdx": 0,
          "registeredAt": "YYYY-MM-DDTHH:MM:SS",
          "switchCount": 0,
          "lastSeenAt": null | "YYYY-MM-DDTHH:MM:SS"},
         {"key": "appId", "scope": "app",
-         "appId": "...", "title": "",
+         "appId": "...", "title": "", "aliases": [],
          "registeredAt": "...", "switchCount": 0, "lastSeenAt": null}
       ]
     }
 
 하위 호환:
+    - v7 (aliases 필드 부재): 로드 시 모든 entry에 aliases=[] 자동 주입
+      후 v8로 승격 저장. 비프 인덱스 재배정 없음 (단순 필드 확장).
     - v6 (반음 64음 테이블): 로드 시 기존 할당을 모두 버리고 v7 온음계 35음
       테이블 기준으로 순차 재할당. 1회성, 사용자는 주파수 재학습 필요.
-    - v5 이하 (거리 최대화 할당): 같은 경로로 한 번에 v7까지 재배정.
+      이어서 v8 aliases 주입까지 한 번에 승격.
+    - v5 이하 (거리 최대화 할당): 같은 경로로 한 번에 v8까지 재배정.
     - v3 이하 (appBeepMap/tabBeepIdx 필드 부재): 동일 재할당 경로로 커버.
-    - v2 (scope 필드 없음): v3→v7 경유 자동 마이그레이션.
-    - `app.json`이 없고 `app.list`가 있으면 최초 `load()`에서 JSON(v7)으로 마이그레이션.
-      모든 줄을 scope="window"로 등록 + 순차 할당 후 `app.list.bak`으로 백업.
+    - v2 (scope 필드 없음): v3→v7→v8 경유 자동 마이그레이션.
+    - `app.json`이 없고 `app.list`가 있으면 최초 `load()`에서 JSON(v8)으로 마이그레이션.
+      모든 줄을 scope="window"로 등록 + 순차 할당 + aliases=[] 후 `app.list.bak`으로 백업.
     - 새 설치(둘 다 없음)는 빈 목록으로 시작.
 
 외부 API:
@@ -39,6 +43,7 @@
     get_meta(path, key)      -> dict|None    항목 메타 조회
     get_app_beep_idx(path, appId) -> int|None  appBeepMap 조회
     get_tab_beep_idx(path, key)   -> int|None  scope=window entry의 tabBeepIdx
+    set_aliases(path, key, aliases) -> bool  entry의 aliases 필드 즉시 업데이트
     is_corrupted(path)       -> bool         app.json 손상 감지 플래그
     reset_cache()            -> None         pytest autouse fixture 전용 (__all__ 격리)
 
@@ -68,6 +73,7 @@ from .migrations import (
     _migrate_from_list,
     _normalize_titles_in_place,
     clear_pre_v7_assignments,
+    ensure_aliases_v8,
 )
 
 # 본 모듈은 데이터 레이어다. 실패 시 `log`로만 보고하고 `ui.message`는 호출하지 않는다.
@@ -108,6 +114,7 @@ def _load_state(list_path: str) -> dict:
       ④ legacy 백업 — 신뢰 가능한 JSON이 확보된 경우만 1회
       ⑤ title normalize 마이그레이션 ("제목 없음 - 메모장" → "제목 없음")
       ⑥ v6 이하 → v7 비프 할당 재배정 + 자동 채움
+      ⑥' v7 이하 → v8 aliases 필드 주입 (ensure_aliases_v8)
       ⑦ 캐시 등록
     """
     # ① 캐시
@@ -152,13 +159,17 @@ def _load_state(list_path: str) -> dict:
         if migrated:
             state["items"] = migrated
             state["dirty"] = True
-            # 비프 할당을 먼저 채워 두고 저장 (디스크에 v7 포맷으로 기록).
+            # 비프 할당을 먼저 채워 두고 저장 (디스크에 v8 포맷으로 기록).
+            # `_migrate_from_list`는 `_new_meta`를 거치므로 각 item에 aliases=[]가
+            # 이미 주입된 상태 → 별도 v8 승격 단계 불필요.
             _ensure_beep_assignments(state)
             if _save_to_disk(list_path, state):
                 state["dirty"] = False
                 json_trustworthy = True
-            # 방금 새 순차 할당을 마쳤으므로 ⑥단계 재배정 루프를 건너뛰도록 표시.
-            state["source_version"] = 7
+            # 방금 새 순차 할당 + aliases=[] 주입을 마쳤으므로 ⑥/⑥' 단계를
+            # 건너뛰도록 source_version=8로 표시. (⑤ title normalize는 아래에서
+            # state["items"]에 대해 항상 실행되므로 legacy 경로도 자연 커버.)
+            state["source_version"] = 8
             # 저장 실패 시 dirty 유지 → 다음 flush에서 재시도
 
     # ④ legacy 백업 — JSON이 신뢰 가능한 상태로 확보된 뒤 1회.
@@ -188,10 +199,17 @@ def _load_state(list_path: str) -> dict:
     clear_pre_v7_assignments(state)
     if _ensure_beep_assignments(state):
         state["dirty"] = True
+
+    # ⑥' v7 이하 → v8 aliases 필드 주입.
+    # _load_from_json이 로드 시점에 이미 aliases=[]를 주입하지만, 본 단계는
+    # source_version < 8일 때 dirty=True를 세팅해 파일에 version=8을 확실히
+    # 기록하게 한다. 비프 재배정/테이블 변경은 없다.
+    ensure_aliases_v8(state)
+
     if state["dirty"]:
         if _save_to_disk(list_path, state):
             state["dirty"] = False
-            state["source_version"] = 7
+            state["source_version"] = 8
 
     # ⑦ 캐시 등록
     _states[list_path] = state
@@ -343,3 +361,45 @@ def get_tab_beep_idx(list_path: str, key: str):
                 return idx
             return None
     return None
+
+
+def set_aliases(list_path: str, key: str, aliases) -> bool:
+    """entry의 aliases 배열을 업데이트하고 즉시 디스크에 저장.
+
+    정규화된 alias 목록을 통으로 교체한다 (append 아님). 등록/편집 UI가
+    "이 창의 대체 제목은 지금 이것"을 한 번에 설정하는 용도.
+
+    입력 필터링:
+        - list/tuple/set 이외 타입은 빈 리스트로 간주
+        - 각 요소는 str + non-empty만 수용, 나머지는 드롭
+        - 저장되는 순서는 입력 순서 유지 (dedup 없음 — 호출부 책임)
+
+    Args:
+        list_path: 기존 app.list 경로 (내부에서 app.json으로 변환)
+        key: 타깃 entry의 key. scope=window는 "appId|title", scope=app은 "appId".
+        aliases: 새 alias 리스트. None/빈 리스트면 alias 제거.
+
+    Returns:
+        bool: 저장 성공 시 True. key 미존재나 디스크 쓰기 실패 시 False.
+            호출부가 False를 보면 사용자에게 알린다.
+    """
+    state = _load_state(list_path)
+    if isinstance(aliases, (list, tuple, set)):
+        clean = [s for s in aliases if isinstance(s, str) and s]
+    else:
+        clean = []
+    # 타깃 entry 찾기
+    found = None
+    for it in state["items"]:
+        if it.get("key") == key:
+            found = it
+            break
+    if found is None:
+        log.warning(f"mtwn: set_aliases key not found {key!r}")
+        return False
+    found["aliases"] = clean
+    state["dirty"] = True
+    if _save_to_disk(list_path, state):
+        state["dirty"] = False
+        return True
+    return False

@@ -54,12 +54,16 @@ def _now_iso() -> str:
 # ------------ 메타 스켈레톤 ------------
 
 
-def _new_meta(key: str, scope: str = SCOPE_WINDOW, tabBeepIdx: int = None) -> dict:
+def _new_meta(key: str, scope: str = SCOPE_WINDOW, tabBeepIdx: int = None,
+              aliases: list = None) -> dict:
     """새 메타 항목 생성.
 
     scope=SCOPE_APP이면 key는 appId 자체, title은 빈 문자열, tabBeepIdx 없음.
     scope=SCOPE_WINDOW이면 key는 'appId|title' 복합키 형식이고 splitKey로 분해.
     tabBeepIdx는 scope=window 전용 필드로, 같은 appId 내 고유 탭 비프(b) idx.
+    aliases는 v8부터 scope 무관 추가 필드로, title-only 역매핑에 쓰일 대체 제목
+    배열. 카카오톡처럼 Alt+Tab 오버레이 name과 foreground name이 다른 앱을
+    단일 entry로 매칭하기 위한 보조 키. 기본값은 빈 리스트.
     """
     if scope == SCOPE_APP:
         appId, title = key, ""
@@ -70,6 +74,7 @@ def _new_meta(key: str, scope: str = SCOPE_WINDOW, tabBeepIdx: int = None) -> di
         "scope": scope,
         "appId": appId,
         "title": title,
+        "aliases": list(aliases) if aliases else [],
         "registeredAt": _now_iso(),
         "switchCount": 0,
         "lastSeenAt": None,
@@ -138,10 +143,11 @@ def _load_from_json(json_path: str):
         app_beep_map[app_id] = idx
 
     # 필수 필드 보강 (옛 포맷/손상 대비).
-    # v2 → v3 → v4 자동 마이그레이션:
+    # v2 → v3 → v4 → v8 자동 마이그레이션:
     #   - scope 누락 → SCOPE_WINDOW로 보정 (v2는 창 단위만 등록 가능했음)
     #   - 알 수 없는 scope 값 → SCOPE_WINDOW로 보정 (손상/오타 대비)
     #   - scope=window의 tabBeepIdx 누락/무효 → 호출부가 거리 기반 재할당 (v3 이하)
+    #   - aliases 필드 부재 → []로 보정 (v7 이하). 타입 불량/요소 비문자열은 필터링.
     fixed = []
     for it in items[:MAX_ITEMS]:
         if not isinstance(it, dict) or "key" not in it:
@@ -156,13 +162,18 @@ def _load_from_json(json_path: str):
         meta = _new_meta(it["key"], scope=scope)
         # 디스크 값으로 메타 덮어쓰기. 단 scope는 위에서 정규화한 값이 우선이므로
         # 디스크 값으로 다시 덮이지 않도록 별도 처리. tabBeepIdx는 scope=window에서
-        # 유효 정수일 때만 수용.
+        # 유효 정수일 때만 수용. aliases는 list + str 요소만 수용, 나머지는 []로 폴백.
         for k, v in it.items():
             if k == "scope":
                 continue
             if k == "tabBeepIdx":
                 if scope == SCOPE_WINDOW and isinstance(v, int) and 0 <= v < BEEP_TABLE_SIZE:
                     meta["tabBeepIdx"] = v
+                continue
+            if k == "aliases":
+                if isinstance(v, list):
+                    meta["aliases"] = [s for s in v if isinstance(s, str) and s]
+                # list 아닌 값이면 _new_meta 기본값 [] 유지
                 continue
             if k in meta:
                 meta[k] = v
@@ -186,11 +197,13 @@ def _save_to_disk(list_path: str, state: dict) -> bool:
         return False
 
     tmp = json_path + ".tmp"
-    # v7: 온음계(C major 7음 × 5옥타브 = 35) 테이블 기반 순차 할당 포맷.
-    # v6(반음 64)에서 테이블 크기와 의미가 동시에 바뀌었으므로 v6 이하 파일은
-    # _load_state ⑥단계에서 전체 재배정된 뒤 여기 도달해 v7로 승격 저장된다.
+    # v8: scope=window/app 양쪽 entry에 `aliases: [str]` 필드 추가.
+    # 카카오톡처럼 Alt+Tab 오버레이 name과 foreground name이 다른 앱을 단일
+    # entry로 매칭하기 위함. v7 이하 파일은 _load_state 단계에서 모든 items에
+    # aliases=[] 주입 후 여기 도달해 v8로 승격 저장된다.
+    # 온음계 테이블(v7 도입)은 그대로 유지. 비프 인덱스 재배정 없음.
     payload = {
-        "version": 7,
+        "version": 8,
         "appBeepMap": dict(state.get("appBeepMap", {})),
         "items": state["items"][:MAX_ITEMS],
     }

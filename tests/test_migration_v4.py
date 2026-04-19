@@ -1,13 +1,15 @@
 # -*- coding: utf-8 -*-
-"""v3→v4→v5→v6→v7 자동 마이그레이션 검증.
+"""v3→v4→v5→v6→v7→v8 자동 마이그레이션 검증.
 
 v3 포맷: `appBeepMap`/`tabBeepIdx` 필드 없음.
 v4 포맷: 전 범위(0..BEEP_TABLE_SIZE) 거리 기반 할당.
 v5 포맷: 사용 범위를 [BEEP_USABLE_START, BEEP_USABLE_END)로 축소한 거리 기반.
 v6 포맷: 반음 64음 테이블 + 등록 순서 기반 순차 할당.
 v7 포맷: 테이블을 C major 온음계 35음으로 교체. v6 이하 파일은 로드 시
-    기존 할당을 모두 버리고 순차로 1회성 재배정 후 version=7로 저장.
-    이후 로드는 재배정 없이 기존 값 보존.
+    기존 할당을 모두 버리고 순차로 1회성 재배정 후 저장.
+v8 포맷: scope=window/app 양쪽 entry에 `aliases: [str]` 배열 추가.
+    v7 이하 파일은 로드 시 모든 entry에 aliases=[] 주입 후 version=8로 저장.
+    비프 재배정 없음 (단순 필드 확장). 이후 로드는 변경 없이 그대로 유지.
 """
 
 import json
@@ -60,7 +62,7 @@ def test_v3_window_only_gets_app_beep_map_and_tab_idx(tmp_path):
     assert keys == ["notepad|제목 없음"]
 
     data = _read_json(_json_path(tmp_path))
-    assert data["version"] == 7
+    assert data["version"] == 8
     # 순차 할당: 첫 앱 = BEEP_USABLE_START, 첫 탭 = BEEP_USABLE_START.
     assert data["appBeepMap"] == {"notepad": BEEP_USABLE_START}
     assert data["items"][0]["tabBeepIdx"] == BEEP_USABLE_START
@@ -178,7 +180,7 @@ def test_v5_file_gets_reassigned_to_v7_sequential(tmp_path):
     store.load(list_path)
 
     data = _read_json(json_path)
-    assert data["version"] == 7
+    assert data["version"] == 8
     # 재배정: 등장 순서대로 chrome=0, notepad=1.
     assert data["appBeepMap"]["chrome"] == BEEP_USABLE_START
     assert data["appBeepMap"]["notepad"] == BEEP_USABLE_START + 1
@@ -188,7 +190,7 @@ def test_v5_file_gets_reassigned_to_v7_sequential(tmp_path):
 
 
 def test_v4_file_gets_reassigned_to_v7_range(tmp_path):
-    """v4 파일도 v7로 재배정. 한 번 재배정되면 version=7로 저장되어 반복 없음."""
+    """v4 파일도 v8까지 단번에 승격. 비프는 순차 재배정, aliases는 []로 주입."""
     json_path = _json_path(tmp_path)
     _write_json(json_path, {
         "version": 4,
@@ -206,7 +208,7 @@ def test_v4_file_gets_reassigned_to_v7_range(tmp_path):
     store.load(list_path)
 
     data = _read_json(json_path)
-    assert data["version"] == 7
+    assert data["version"] == 8
     # 재배정된 값은 순차 기준. 첫 할당은 BEEP_USABLE_START.
     assert data["appBeepMap"]["chrome"] == BEEP_USABLE_START
     assert data["items"][0]["tabBeepIdx"] == BEEP_USABLE_START
@@ -239,7 +241,7 @@ def test_v6_file_gets_reassigned_to_v7_sequential(tmp_path):
     store.load(list_path)
 
     data = _read_json(json_path)
-    assert data["version"] == 7
+    assert data["version"] == 8
     # 등장 순서대로 재배정: chrome=0, firefox=1.
     assert data["appBeepMap"]["chrome"] == BEEP_USABLE_START
     assert data["appBeepMap"]["firefox"] == BEEP_USABLE_START + 1
@@ -249,7 +251,7 @@ def test_v6_file_gets_reassigned_to_v7_sequential(tmp_path):
 
 
 def test_v7_file_preserves_existing_assignments(tmp_path):
-    """이미 v7로 저장된 파일은 로드 시 재배정하지 않음."""
+    """v7 파일 → v8 승격 시 비프 할당은 그대로 보존. aliases=[]만 추가."""
     json_path = _json_path(tmp_path)
     _write_json(json_path, {
         "version": 7,
@@ -267,9 +269,11 @@ def test_v7_file_preserves_existing_assignments(tmp_path):
     store.load(list_path)
 
     data = _read_json(json_path)
-    assert data["version"] == 7
+    # v7 → v8 승격: version 필드 교체 + aliases 배열 주입 (비프 재배정 없음).
+    assert data["version"] == 8
     assert data["appBeepMap"]["chrome"] == 12
     assert data["items"][0]["tabBeepIdx"] == 20
+    assert data["items"][0]["aliases"] == []
 
 
 def test_v7_file_fills_partial_missing_fields(tmp_path):
@@ -382,6 +386,6 @@ def test_v4_reassignment_not_repeated_after_first_load(tmp_path):
 
     store.load(list_path)
     second_data = _read_json(json_path)
-    assert second_data["version"] == 7
+    assert second_data["version"] == 8
     assert second_data["appBeepMap"]["chrome"] == first_chrome
     assert second_data["items"][0]["tabBeepIdx"] == first_tab

@@ -23,9 +23,9 @@ def test_store_package_has_docstring():
 
 
 def test_store_public_api_reexported():
-    """Phase R3 이후 공개 API 9개 + 내부 유틸 1개(reset_cache) 구조.
+    """Phase 7(v8 aliases) 이후 공개 API 10개 + 내부 유틸 1개(reset_cache) 구조.
 
-    런타임 코드가 실제 쓰는 9개만 __all__에 노출. reset_cache는 테스트 전용
+    런타임 코드가 실제 쓰는 10개만 __all__에 노출. reset_cache는 테스트 전용
     유틸로 재export는 유지하되 `from store import *`에서는 빠진다.
     prune_stale은 본체/테스트와 함께 제거됨 (Phase R3).
     """
@@ -34,18 +34,20 @@ def test_store_public_api_reexported():
     expected = {
         "load", "save", "record_switch", "flush", "reload",
         "is_corrupted", "get_meta", "get_app_beep_idx", "get_tab_beep_idx",
+        "set_aliases",
     }
     missing = expected - set(dir(store))
     assert not missing, f"missing public API: {missing}"
 
 
 def test_store_all_only_contains_runtime_api():
-    """`__all__`에는 런타임 9개만. reset_cache/prune_stale은 금지."""
+    """`__all__`에는 런타임 10개만. reset_cache/prune_stale은 금지."""
     from globalPlugins.multiTaskingWindowNotifier import store
 
     public = {
         "load", "save", "record_switch", "flush", "reload",
         "is_corrupted", "get_meta", "get_app_beep_idx", "get_tab_beep_idx",
+        "set_aliases",
     }
     assert set(store.__all__) == public, (
         f"__all__ drift: {set(store.__all__) ^ public}"

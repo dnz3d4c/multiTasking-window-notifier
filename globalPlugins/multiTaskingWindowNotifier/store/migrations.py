@@ -11,10 +11,13 @@ v6_to_v7_beep_reassign 3파일)를 단일 파일로 통합. 각 함수는 `_load
     _backup_legacy_list      → ③ 마이그레이션 완료 후 .bak 이동
     _normalize_titles_in_place → ⑤ title 정규화 + dedup
     clear_pre_v7_assignments → ⑥ v6 이하 비프 인덱스 clear (재배정은 assign.py)
+    ensure_aliases_v8        → ⑥' v7 이하 모든 entry에 aliases=[] 주입 + v8 승격
 
-현 사용자에겐 app.json이 이미 v7이라 대부분 경로가 no-op이지만, 신규 설치/
-구형 이관 대비로 유지한다. v8 추가 계획이 없어 분리 비용 대비 통합 이득이
-크다는 판단으로 단일 파일로 병합.
+v8는 scope=window/app 양쪽 entry에 aliases 배열을 추가하는 단순 필드
+확장이라 비프 재배정/테이블 변경은 없다. `_load_from_json`이 이미 로드
+시점에 aliases 부재 필드를 []로 채우므로 ensure_aliases_v8는 주로 dirty
+플래그 세팅과 저장 트리거 역할을 맡아 파일에 `version=8`이 확실히 기록되게
+한다.
 """
 
 import os
@@ -198,4 +201,40 @@ def clear_pre_v7_assignments(state: dict) -> bool:
         if it.get("scope") == SCOPE_WINDOW and "tabBeepIdx" in it:
             del it["tabBeepIdx"]
     state["dirty"] = True
+    return True
+
+
+# ---------------- v7 이하 → v8 aliases 필드 주입 ----------------
+
+
+def ensure_aliases_v8(state: dict) -> bool:
+    """source_version < 8인 state의 모든 entry에 aliases 필드 확보 + dirty 표시.
+
+    `_load_from_json`이 로드 시점에 이미 aliases 부재 필드를 []로 채우므로
+    대부분의 entry는 아무 변경 없이 넘어간다. 본 함수의 실질 효과는:
+      1) 혹시 _new_meta 경로를 거치지 않은 잔여 item에 대한 최종 방어
+      2) source_version < 8 조건에서 dirty=True로 표시해 `version=8` 기록 유도
+
+    Args:
+        state: `_load_state`가 구성한 상태 dict.
+
+    Returns:
+        bool: 승격이 필요했으면 True (source_version >= 8이면 False, no-op).
+    """
+    if state.get("source_version", 0) >= 8:
+        return False
+
+    for it in state.get("items", []):
+        aliases = it.get("aliases")
+        if not isinstance(aliases, list):
+            it["aliases"] = []
+        else:
+            # 비문자열/빈 문자열 요소 정리. list 타입 보존.
+            it["aliases"] = [s for s in aliases if isinstance(s, str) and s]
+
+    state["dirty"] = True
+    log.info(
+        f"mtwn: migrate v{state.get('source_version', 0)}→v8, "
+        "aliases field ensured on all items"
+    )
     return True
