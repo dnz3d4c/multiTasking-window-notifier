@@ -103,7 +103,7 @@ def test_window_tab_beep_is_distinct_per_window(plugin, monkeypatch):
     plugin._match_and_beep("chrome", "Tab A")
     # 중복 가드 회피용 — 시간 + 시그니처 모두 리셋.
     plugin._last_matched_ts = 0.0
-    plugin._last_event_sig = None
+    plugin._matcher.last_event_sig = None
     plugin._match_and_beep("chrome", "Tab B")
 
     # Tab A / Tab B 모두 chrome 앱 비프 공유(app_idx=START),
@@ -148,15 +148,15 @@ def test_dedup_guard_resets_after_window(plugin, monkeypatch):
     """시간 가드와 시그니처 가드 둘 다 풀리면 재매칭이 다시 발사된다.
 
     실전에선 사용자가 다른 앱으로 전환했다가 돌아오는 시나리오가
-    여기에 해당. 다른 매칭이 끼어들면 _last_event_sig가 자연 갱신된다.
-    단위 테스트에선 두 상태를 직접 리셋.
+    여기에 해당. 다른 매칭이 끼어들거나 비매칭 이벤트가 지나가면
+    last_event_sig가 자연 리셋된다. 단위 테스트에선 두 상태를 직접 리셋.
     """
     _seed(plugin, [("chrome|YouTube", SCOPE_WINDOW)])
     calls = _capture_beeps(monkeypatch)
 
     plugin._match_and_beep("chrome", "YouTube")
     plugin._last_matched_ts = 0.0  # 시간 가드 리셋
-    plugin._last_event_sig = None  # 시그니처 가드 리셋 (복귀 시나리오 모사)
+    plugin._matcher.last_event_sig = None  # 시그니처 가드 리셋 (복귀 시나리오 모사)
     plugin._match_and_beep("chrome", "YouTube")
 
     assert len(calls) == 2
@@ -279,3 +279,32 @@ def test_empty_appid_still_honors_title_reverse_mapping(plugin, monkeypatch):
     plugin._match_and_beep("", "Memo")
 
     assert calls == [(BEEP_USABLE_START, BEEP_USABLE_START, SCOPE_WINDOW)]
+
+
+def test_unmatched_event_clears_sig_guard(plugin, monkeypatch):
+    """비매칭 이벤트(등록 안 된 창)가 지나가면 sig_guard가 리셋되어
+    이후 동일 등록 창으로 복귀 시 비프가 재생된다.
+
+    실전 시나리오: Firefox에서 YouTube 탭(등록) → 비등록 창/탭 경유 →
+    YouTube 복귀. 중간 비등록 창에서는 matched_key=None으로 return되지만,
+    last_event_sig가 None으로 리셋되어 복귀 시 sig 동일성 비교가 어긋나
+    정상 통과한다. sig_guard stale 버그 회귀 방지의 핵심 케이스.
+    """
+    _seed(plugin, [("firefox|YouTube", SCOPE_WINDOW)])
+    calls = _capture_beeps(monkeypatch)
+
+    # 1. 등록 창 매칭 → sig 기록
+    plugin._match_and_beep("firefox", "YouTube", tab_sig=265170)
+    assert plugin._matcher.last_event_sig is not None
+    assert len(calls) == 1
+
+    # 2. 비등록 창 경유 → matched_key=None 분기 진입, sig 리셋
+    plugin._last_matched_ts = 0.0
+    plugin._match_and_beep("unknown_app", "no_such_title", tab_sig=99999)
+    assert plugin._matcher.last_event_sig is None
+    assert len(calls) == 1  # 비등록이므로 비프는 안 늘어남
+
+    # 3. 동일 등록 창으로 복귀 → sig_guard 통과 → 비프 재생
+    plugin._last_matched_ts = 0.0
+    plugin._match_and_beep("firefox", "YouTube", tab_sig=265170)
+    assert len(calls) == 2

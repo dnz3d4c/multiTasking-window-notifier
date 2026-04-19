@@ -35,8 +35,7 @@ class Matcher:
     """매칭 로직과 비프 재생을 캡슐화.
 
     dedup 상태(`last_event_sig`)는 인스턴스 속성으로 보유한다. 테스트/복귀
-    시나리오에서는 직접 None 대입으로 초기화할 수 있다 (GlobalPlugin이
-    `_last_event_sig` property로 pass-through 노출).
+    시나리오에서는 `matcher.last_event_sig = None` 직접 대입으로 초기화.
     """
 
     def __init__(self, plugin):
@@ -118,13 +117,17 @@ class Matcher:
             matched_key, scope = appId, SCOPE_APP
 
         if matched_key is None:
+            # 비매칭 이벤트도 sig 연속성을 끊는다. 등록 안 된 창을 경유한 뒤
+            # 등록 창으로 복귀할 때 직전 sig가 stale로 남아 sig_guard에 오 skip
+            # 되는 버그 방지. 자식 컨트롤 재진입은 matched_key 확정 경로에서만
+            # 발생하므로 이 리셋의 영향권 밖.
+            self.last_event_sig = None
             return
 
         # 시그니처 dedup: (appId, title, tab_sig) 동일이면 skip.
-        # tab_sig(hwnd)는 호출부에서 분기별로 추출. 같은 탭 자식 컨트롤 재진입은
-        # hwnd 동일 → skip. Ctrl+Tab으로 다른 탭이 되면 hwnd 달라 통과. 시간 개념
-        # 없이 "직전 이벤트와 완전 동일한가"만 보기 때문에 빠른 탭 왕복(A→B→A)도
-        # 중간 B에서 sig가 갱신되어 복귀한 A가 정상 통과한다.
+        # 같은 탭의 자식 컨트롤 재진입(hwnd 동일)만 차단. 다른 창으로의 이동은
+        # 위 matched_key=None 분기에서 sig가 None으로 리셋되므로, 등록 여부와
+        # 무관하게 복귀 시 sig 동일성 비교가 어긋나 자연 통과한다.
         event_sig = (appId, title, tab_sig)
         if event_sig == self.last_event_sig:
             if settings.get("debugLogging"):

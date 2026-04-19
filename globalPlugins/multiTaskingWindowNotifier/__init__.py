@@ -82,8 +82,8 @@ class GlobalPlugin(ScriptsMixin, globalPluginHandler.GlobalPlugin):
         self._rebuild_lookup()
         # 전환 카운트 디바운스 저장: switchFlusher가 카운터/타이머 상태 캡슐화.
         self._flush_scheduler = FlushScheduler(store.flush, self.appListFile)
-        # 매칭 + 비프 재생 + 시그니처 dedup 캡슐화. dedup 상태(_last_event_sig)는
-        # Matcher.last_event_sig에 있으며 아래 property로 테스트 호환 유지.
+        # 매칭 + 비프 재생 + 시그니처 dedup 캡슐화. dedup 상태는
+        # Matcher.last_event_sig가 직접 소유(외부에서는 plugin._matcher로 접근).
         self._matcher = Matcher(self)
 
         # 손상된 app.json을 만났을 때 한 번만 사용자에게 안내.
@@ -137,16 +137,7 @@ class GlobalPlugin(ScriptsMixin, globalPluginHandler.GlobalPlugin):
         """appList 변경 시 lookup 재구성. 실제 로직은 LookupIndex.rebuild."""
         self._lookup.rebuild(self.appList)
 
-    # ---- matcher 위임 (테스트 호환 + 기존 호출부 유지) ----
-
-    @property
-    def _last_event_sig(self):
-        """호환용 pass-through. 실제 소유자는 Matcher."""
-        return self._matcher.last_event_sig
-
-    @_last_event_sig.setter
-    def _last_event_sig(self, value):
-        self._matcher.last_event_sig = value
+    # ---- matcher 위임 ----
 
     def _match_and_beep(self, appId, title, tab_sig=0):
         """공통 매칭 루틴. 실제 로직은 Matcher.match_and_beep."""
