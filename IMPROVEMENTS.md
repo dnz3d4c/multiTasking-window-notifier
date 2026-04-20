@@ -275,9 +275,41 @@ NVDA 소스(`ext/nvda/source/`)와 프로젝트 소스를 교차 탐색해 "NVDA
 
 ---
 
+### 비프 프리셋 확장 시리즈 Phase 1 (완료)
+
+"비프 소리가 단조롭다 + 8비트/만화풍으로 다양화" 사용자 요구에 대응하는 신규 Phase 시리즈의 첫 단계. 상세 플랜: `C:\Users\advck\.claude\plans\gleaming-drifting-dragonfly.md`.
+
+**변경**:
+- `constants.py`: `PRESETS` dict + `CLASSIC_PRESET_ID` 신설. classic(현행 C major 35음), pentatonic(C D E G A × 7옥타브), fifths(완전5도 진행 재배열) 3개. 부팅 시 slotCount/freqs 길이/previewSlots 범위 assert 검증. 기존 `BEEP_TABLE`/`BEEP_TABLE_SIZE`는 classic.freqs 공유 참조로 유지(Phase 3에서 상수 제거 예정).
+- `settings.py`: CONFSPEC에 `beepPreset: string(default="classic")` 추가. 기존 `register()` 기본값 주입 경로로 무변경 동작.
+- `beepPlayer.py`: `_get_active_preset()`(미지 id 시 classic 폴백 + 1회 log.warning) + `play_preview()` 신규. `play_beep()`가 프리셋 freqs/slotCount 룩업으로 교체. 시그니처/호출부 호환 유지.
+- `settingsPanel.py`: `wx.ListBox` + 설명 `wx.StaticText` + "미리듣기(&P)"/"기본값(&D)" 버튼 추가. 기존 SpinCtrl/CheckBox 유지. onSave에 beepPreset 저장. 번역 레이어에서 nameLabel/descriptionLabel `_()` 처리.
+- `store/assign.py`: 동작 무변경. 모듈 docstring에 Phase 3 예고(할당공간 128 고정 + modulo wrap) 주석만 추가.
+
+**설계 원칙** (플랜 반영):
+- **8비트 본질은 소리 스타일이지 다채널 믹싱이 아님** — 기존 "app음 + tab음 2음 순차"가 사실상 동시 영역을 커버. 다채널 PCM 믹싱은 범위 밖(`voices` 필드/Chord Duet 프리셋 모두 비채택).
+- Non-goals: wav 번들, numpy 의존, nvwave.WavePlayer 다중 스트림, 엄숙 모드, 미리듣기 경합 락(Phase 3 이관), `voices` 필드.
+- 컨벤션: dict 필드 camelCase, Python 변수 snake_case, 이모지 제거.
+
+**검증**:
+- NVDA Addon Development Specialist 리뷰 통과("반드시 수정" 0건, 제안 1건 "settings.get 통일" 반영).
+- 빌드: `multiTaskingWindowNotifier-0.9-dev.nvda-addon` 22 files 65.1 KB 성공.
+- 기존 169+개 테스트 회귀 검증은 Phase 2 전 실기 확인 단계에서.
+
+**차기**: Phase 2(반복 억제 + 옥타브 변주 플래그), Phase 3(합성 엔진 + 파형 다양화 + slotCount 가변 인프라), Phase 4(synthSpecs 타악/SFX), Phase 5(Daily Life + Humor Pack 옵트인).
+
+---
+
 ## 현재 로드맵
 
-*(활성 로드맵 없음. Phase 1~8 + R 완료. 차기 작업은 사용자가 새 스키마/기능 요청 시 재시작.)*
+### 비프 프리셋 확장 시리즈 (Phase 2~5, 진행 중)
+
+상세 플랜: `C:\Users\advck\.claude\plans\gleaming-drifting-dragonfly.md`.
+
+- **Phase 2** — 프리셋별 `suppressRepeat`/`octaveVariation` 플래그 + matcher 최근 매칭 캐시. Pentatonic Calm 기본 on.
+- **Phase 3** — `nvwave` + PCM 합성 도입. `synthEngine.py` 순수 함수 모듈 신설. `WAVEFORMS` 라이브러리(sine/square/triangle/pulse25/pulse12/saw/noise + portamento/fm_wobble/vibrato + exp_decay/pluck/boing 엔벨로프). Hybrid 프리셋 3개 추가(Arcade Pop / Coin Dash / Soft Retro). `BEEP_TABLE_SIZE` 상수 제거, 할당 공간 `MAX_ITEMS=128` 고정 + 재생 시점 modulo wrap. **착수 전 사전 실측 게이트 필수**.
+- **Phase 4** — `synthSpecs` 스키마 도입. Percussive/Atonal 프리셋 3개(Drum Kit 8슬롯 / Lazer Pack 16슬롯 / 8-Bit Jump 20슬롯).
+- **Phase 5** — 일상 소리 프리셋(Daily Life 24슬롯) + 옵트인 Humor Pack(16슬롯, 1회성 경고). 방귀/트림/딸꾹질 등은 만화풍 PCM 합성으로만 구현.
 
 ---
 

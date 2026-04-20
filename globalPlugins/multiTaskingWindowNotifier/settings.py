@@ -24,10 +24,14 @@ from .constants import ADDON_NAME
 #                      한 덩어리로 뭉쳐 들린다는 피드백 후 재조정.
 # - debugLogging      : event_gainFocus 진단 로그. Ctrl+Tab/오버레이 classname 추적용.
 #                      기본 False. 켜면 NVDA 로그(%APPDATA%\\nvda\\nvda.log)에 한 줄씩 기록.
+# - beepPreset        : 비프 프리셋 id (Phase 1 신설). constants.PRESETS의 key.
+#                      미지 id 지정 시 beepPlayer가 CLASSIC_PRESET_ID로 폴백.
+#                      설치 직후/롤백 시 "classic"으로 현행 소리 그대로 유지.
 CONFSPEC = {
     "beepDuration": "integer(default=50, min=20, max=500)",
     "beepGapMs": "integer(default=100, min=0, max=200)",
     "debugLogging": "boolean(default=False)",
+    "beepPreset": 'string(default="classic")',
 }
 
 # 과거 버전 confspec에 있었으나 의미가 사라져 제거된 키 목록.

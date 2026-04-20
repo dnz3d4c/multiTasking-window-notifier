@@ -22,7 +22,8 @@ import config
 from gui import guiHelper
 from gui.settingsDialogs import SettingsPanel
 
-from .constants import ADDON_NAME
+from . import beepPlayer, settings
+from .constants import ADDON_NAME, CLASSIC_PRESET_ID, PRESETS
 
 # 번역 초기화(선택). NVDA 외 환경(유닛 테스트 등)에서 _를 정의해두는 폴백.
 try:
@@ -38,9 +39,42 @@ except Exception:
 DURATION_MIN, DURATION_MAX = 20, 500
 GAP_MIN, GAP_MAX = 0, 200
 
+# 프리셋 type → 사용자 노출 카테고리 레이블. ListBox 항목 접두사로 사용.
+# Phase 1에선 tonal만 있지만 Phase 3~5 대비 전체 매핑을 미리 둔다.
+_TYPE_CATEGORY_LABELS = {
+    "tonal": _("음계"),
+    "hybrid": _("혼합"),
+    "percussive": _("타악"),
+    "atonal": _("효과음"),
+}
+
 
 def _clamp(value: int, lo: int, hi: int) -> int:
     return max(lo, min(hi, int(value)))
+
+
+def _format_preset_label(preset: dict) -> str:
+    """ListBox 한 줄에 표시되는 프리셋 레이블 생성.
+
+    포맷: "[카테고리] 이름 — N slots"(+ " (옵트인)")
+    이모지 사용 안 함 — NVDA TTS 엔진별로 이모지 처리가 다르고 소음 유발.
+    """
+    category = _TYPE_CATEGORY_LABELS.get(preset["type"], preset["type"])
+    name = _(preset["nameLabel"])
+    slots = preset["slotCount"]
+    optin_suffix = _(" (옵트인)") if preset["optIn"] else ""
+    return f"[{category}] {name} — {slots} slots{optin_suffix}"
+
+
+def _ordered_preset_ids():
+    """ListBox 항목 순서. PRESETS의 dict 삽입 순서를 그대로 쓴다.
+
+    Python 3.7+는 dict 순서 보존이 보장되고 constants.PRESETS는 사용자 경험에
+    맞춰 classic→pentatonic→fifths 순으로 정의돼 있다. 따라서 list(PRESETS) 만으로
+    표시 순서가 일관된다. Phase 5 opt-in 프리셋(humor_pack)은 dict 말미에
+    자연스럽게 오도록 constants에서 순서 맞춰 추가.
+    """
+    return list(PRESETS.keys())
 
 
 class MultiTaskingSettingsPanel(SettingsPanel):
@@ -52,6 +86,46 @@ class MultiTaskingSettingsPanel(SettingsPanel):
     def makeSettings(self, settingsSizer):
         conf = config.conf[ADDON_NAME]
         sHelper = guiHelper.BoxSizerHelper(self, sizer=settingsSizer)
+
+        # 프리셋 ListBox + 설명 라벨 + "미리듣기"/"기본값" 버튼 세트.
+        # 현재 선택 프리셋이 변경되면 설명 라벨(StaticText)이 갱신되고,
+        # 미리듣기 버튼은 그 선택의 previewSlots를 바로 재생해 사용자가 저장 전에
+        # 소리를 확인할 수 있게 한다.
+        self._preset_ids = _ordered_preset_ids()
+        # Translators: 프리셋 ListBox 라벨.
+        self.presetList = sHelper.addLabeledControl(
+            _("비프 프리셋 (&L):"),
+            wx.ListBox,
+            choices=[_format_preset_label(PRESETS[pid]) for pid in self._preset_ids],
+            style=wx.LB_SINGLE,
+        )
+        # settings.get이 CONFSPEC default로 폴백까지 담당하므로 여기서는 조회 결과를
+        # 그대로 신뢰한다. 혹시 사용자가 수동 편집으로 미지 id를 넣었으면 ListBox에
+        # 대응 항목이 없어 아래 in 검사에서 classic으로 재정렬된다.
+        current_preset_id = settings.get("beepPreset")
+        if current_preset_id not in self._preset_ids:
+            current_preset_id = CLASSIC_PRESET_ID
+        self.presetList.SetSelection(self._preset_ids.index(current_preset_id))
+
+        # 프리셋 설명 라벨. focus 변경 시 descriptionLabel로 갱신.
+        self._presetDescription = wx.StaticText(
+            self,
+            label=_(PRESETS[current_preset_id]["descriptionLabel"]),
+        )
+        sHelper.addItem(self._presetDescription)
+        self.presetList.Bind(wx.EVT_LISTBOX, self._onPresetChanged)
+
+        # "미리듣기"/"기본값" 버튼 한 줄 배치.
+        btnRow = wx.BoxSizer(wx.HORIZONTAL)
+        # Translators: 선택한 프리셋의 대표 슬롯 2개를 현장 재생하는 버튼.
+        self._previewBtn = wx.Button(self, label=_("미리듣기(&P)"))
+        self._previewBtn.Bind(wx.EVT_BUTTON, self._onPreviewClicked)
+        btnRow.Add(self._previewBtn, 0, wx.RIGHT, 8)
+        # Translators: 프리셋 선택을 Classic Tones(현행 기본)로 되돌리는 버튼.
+        self._defaultBtn = wx.Button(self, label=_("기본값(&D)"))
+        self._defaultBtn.Bind(wx.EVT_BUTTON, self._onDefaultClicked)
+        btnRow.Add(self._defaultBtn, 0)
+        sHelper.addItem(btnRow)
 
         # Translators: 비프음 길이 SpinCtrl 라벨. 단위는 밀리초. 범위 20~500.
         self.durationSpin = sHelper.addLabeledControl(
@@ -106,3 +180,47 @@ class MultiTaskingSettingsPanel(SettingsPanel):
         conf["beepDuration"] = duration
         conf["beepGapMs"] = gap_ms
         conf["debugLogging"] = self.debugLoggingCheck.IsChecked()
+        # 프리셋 선택 저장. ListBox 미선택(-1) 방어 — 사용자가 전체 해제한 경우
+        # classic 폴백(체감 회귀 없음).
+        sel = self.presetList.GetSelection()
+        if 0 <= sel < len(self._preset_ids):
+            conf["beepPreset"] = self._preset_ids[sel]
+        else:
+            conf["beepPreset"] = CLASSIC_PRESET_ID
+
+    # ------------------------------------------------------------------
+    # 프리셋 ListBox 이벤트
+    # ------------------------------------------------------------------
+
+    def _current_preset_id(self) -> str:
+        sel = self.presetList.GetSelection()
+        if 0 <= sel < len(self._preset_ids):
+            return self._preset_ids[sel]
+        return CLASSIC_PRESET_ID
+
+    def _onPresetChanged(self, event):
+        """ListBox 선택이 바뀌면 설명 라벨을 갱신."""
+        preset_id = self._current_preset_id()
+        preset = PRESETS.get(preset_id, PRESETS[CLASSIC_PRESET_ID])
+        self._presetDescription.SetLabel(_(preset["descriptionLabel"]))
+        # 라벨 길이 변화에 맞춰 레이아웃 재계산. 재발화 스팸을 피하려
+        # descriptionLabel은 LabelValue로 교체하지 않고 SetLabel만 사용.
+        self._presetDescription.GetParent().Layout()
+
+    def _onPreviewClicked(self, event):
+        """현재 선택 프리셋의 previewSlots 2음을 현재 SpinCtrl 값으로 재생.
+
+        패널을 열고 duration/gap을 수정한 상태(아직 onSave 전)에서도 조정한 값 그대로
+        들려줘야 "원하는 타이밍인지" 확인 가능하므로 SpinCtrl의 GetValue()를 쓴다.
+        settings(config.conf) 값을 읽으면 저장된 이전 값으로 재생돼 사용자 의도
+        벗어남.
+        """
+        duration = _clamp(self.durationSpin.GetValue(), DURATION_MIN, DURATION_MAX)
+        gap_ms = _clamp(self.gapSpin.GetValue(), GAP_MIN, GAP_MAX)
+        beepPlayer.play_preview(self._current_preset_id(), duration, gap_ms)
+
+    def _onDefaultClicked(self, event):
+        """프리셋 선택을 Classic Tones로 되돌린다. 즉시 저장되진 않고 onSave에서 반영."""
+        if CLASSIC_PRESET_ID in self._preset_ids:
+            self.presetList.SetSelection(self._preset_ids.index(CLASSIC_PRESET_ID))
+            self._onPresetChanged(None)

@@ -15,6 +15,15 @@
 
 비담당:
     - I/O (store.io), 마이그레이션 (store.migrations), 핫 패스 (store.core).
+
+Phase 1 후속 예고 (Phase 3):
+    가변 slotCount 프리셋(Phase 4 Drum Kit/Lazer Pack 등) 도입을 위해 할당 공간을
+    항상 `MAX_ITEMS=128`로 고정하고, 재생 시점에만 `effective_idx = stored_idx %
+    preset.slotCount` modulo wrap으로 처리한다. 이때 이 모듈의 `_assign_next_idx`
+    기본값 `size`가 BEEP_USABLE_SIZE → MAX_ITEMS로, 호출부 명시값이 일관되게
+    MAX_ITEMS로 전환된다. 이 모듈은 `settings`를 import하지 않는 순수 함수 레이어로
+    유지되며, 프리셋/슬롯 카운트 조회 책임은 `matcher`/`__init__.py`에 둔다.
+    Phase 1(현재)은 구조 보존 — 주석만 예고를 남긴다.
 """
 
 from logHandler import log
