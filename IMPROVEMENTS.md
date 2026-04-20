@@ -322,15 +322,47 @@ NVDA 소스(`ext/nvda/source/`)와 프로젝트 소스를 교차 탐색해 "NVDA
 
 **차기**: Phase 3(합성 엔진 + 파형 다양화 + slotCount 가변 인프라), Phase 4(synthSpecs 타악/SFX), Phase 5(Daily Life + Humor Pack 옵트인).
 
+### 비프 프리셋 확장 시리즈 Phase 3 (완료)
+
+**합성 엔진 도입 + 파형 다양화 + Hybrid 프리셋 3개**. 실무상 slotCount 가변 인프라(할당 공간 `MAX_ITEMS=128` 고정)는 Phase 4로 이관하고 Phase 3는 모든 프리셋 slotCount=35 유지 — modulo wrap이 no-op이라 store 레이어 수정 없이 안전.
+
+**변경**:
+- `synthEngine.py` **신규** — 순수 함수 모듈. sine/square(pulse50)/pulse25/pulse12/triangle/saw/noise 7종 파형. precomputed sine LUT(1024) + 위상 누적으로 `math.sin` 호출 제거. 노이즈는 결정론적 `random.Random(str seed)`. 파일 기반 wav 캐시(`tempfile.gettempdir()` 하위 `mtwn_wavcache/`, SHA1 해시 파일명, atomic write). 모듈 dict + `threading.Lock`, maxsize=1024 FIFO. 미지 waveform은 sine 폴백 + 1회 log.warning. `nvwave`/`config`/`settings` import 금지(계층 분리).
+- `beepPlayer.py`:
+  - `_play_via_synth(freq, duration, waveform)` / `_play_one_beep(freq, duration, waveform)` 헬퍼 추가. synthEngine + `nvwave.playWaveFile(wav_path, asynchronous=True)` 경로. 전 계층 try/except → `tones.beep` 폴백(절대 침묵 금지).
+  - `_schedule_second_beep(freq, duration, gap_ms, waveform=None)` 일반화.
+  - `play_beep` / `play_preview`가 프리셋 메타의 `waveform` 키 분기. 없으면 기존 tones.beep 경로(classic/pentatonic/fifths 그대로).
+  - **시그니처 변경 없음** — 기존 186개 테스트 호환, matcher.py 변경 없음.
+- `constants.py` — Hybrid 프리셋 3개 추가, 모두 slotCount=35, freqs는 BEEP_TABLE 공유(음정 동일, 음색만 교체):
+  - `arcade_pop` — Pulse 50% 사각파
+  - `coin_dash` — Pulse 25% 얇은 사각파
+  - `soft_retro` — Triangle 삼각파
+
+**핵심 기술 결정**:
+- **`nvwave.playWaveFile`은 파일 경로만 수용** — BytesIO/bytes 거부(NVDA `source/nvwave.py:82-155`의 `os.path.basename(fileName)` 근거). 첫 리뷰에서 Critical로 잡혀 `io.BytesIO` 반환에서 **파일 경로 문자열 반환**으로 전면 교체. 같은 (waveform, freq, duration, sample_rate) 입력 → 결정론적 해시 경로 → 첫 호출만 디스크 I/O, 이후 dict lookup만.
+- **"8비트 본질은 소리 스타일"** 원칙 그대로 — 다채널 믹싱/`voices` 필드/`play_preset(preset, …)` 시그니처 변경 전부 도입하지 않음. 기존 2음 순차 구조 유지 + 파형만 교체.
+
+**실측** (NVDA 외 CPython 3.11):
+- Cold render (PCM 합성 + 디스크 쓰기): **0.8ms/call** (목표 <5ms 달성)
+- Cached hit (dict lookup): **<1μs/call**
+- 노이즈 결정성 확인
+
+**검증**:
+- NVDA Addon Development Specialist 리뷰 2회차. 1차 리뷰에서 BytesIO→파일 경로 Critical 수정, 2차에서 통과. 경미 제안(`to_wav_bytes` dead code) 반영 — 제거 + `io` import 정리.
+- 186 unit 테스트 전건 PASS.
+- 빌드: `multiTaskingWindowNotifier-0.9-dev.nvda-addon` 23 files 73.0 KB.
+- **실기 검증 필요**: arcade_pop/coin_dash/soft_retro 선택 후 Alt+Tab 비프 청취. tones.beep 폴백 없이 정상 nvwave 재생 확인 필수.
+
+**차기**: Phase 4(synthSpecs + Percussive/Atonal 프리셋 3개), Phase 5(Daily Life + Humor Pack).
+
 ---
 
 ## 현재 로드맵
 
-### 비프 프리셋 확장 시리즈 (Phase 3~5, 진행 중)
+### 비프 프리셋 확장 시리즈 (Phase 4~5, 진행 중)
 
 상세 플랜: `C:\Users\advck\.claude\plans\gleaming-drifting-dragonfly.md`.
-- **Phase 3** — `nvwave` + PCM 합성 도입. `synthEngine.py` 순수 함수 모듈 신설. `WAVEFORMS` 라이브러리(sine/square/triangle/pulse25/pulse12/saw/noise + portamento/fm_wobble/vibrato + exp_decay/pluck/boing 엔벨로프). Hybrid 프리셋 3개 추가(Arcade Pop / Coin Dash / Soft Retro). `BEEP_TABLE_SIZE` 상수 제거, 할당 공간 `MAX_ITEMS=128` 고정 + 재생 시점 modulo wrap. **착수 전 사전 실측 게이트 필수**.
-- **Phase 4** — `synthSpecs` 스키마 도입. Percussive/Atonal 프리셋 3개(Drum Kit 8슬롯 / Lazer Pack 16슬롯 / 8-Bit Jump 20슬롯).
+- **Phase 4** — `synthSpecs` 스키마 도입(슬롯 = 짧은 SFX 한 덩이). Percussive/Atonal 프리셋 3개(Drum Kit 8슬롯 / Lazer Pack 16슬롯 / 8-Bit Jump 20슬롯). **이 단계에서 slotCount 가변 + 할당 공간 128 고정 + 재생 시점 modulo wrap 도입**(Phase 3에서 Phase 4로 이관한 인프라).
 - **Phase 5** — 일상 소리 프리셋(Daily Life 24슬롯) + 옵트인 Humor Pack(16슬롯, 1회성 경고). 방귀/트림/딸꾹질 등은 만화풍 PCM 합성으로만 구현.
 
 ---

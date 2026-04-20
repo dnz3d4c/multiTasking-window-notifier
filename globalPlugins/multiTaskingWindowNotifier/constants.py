@@ -190,6 +190,62 @@ PRESETS = {
         "octaveVariation": False,
         "gain": 1.0,
     },
+    # Phase 3: Hybrid 프리셋 — nvwave + synthEngine PCM 합성 경로. `waveform` 키
+    # 존재가 신 경로 진입 트리거. freqs는 BEEP_TABLE(C3~B7)을 공유해 음정 구조를
+    # classic과 동일하게 유지하되 음색만 달라진다. 모든 Hybrid 프리셋은
+    # slotCount=35로 modulo wrap이 no-op(향후 Phase 4에서 slotCount 가변 프리셋
+    # 도입 시 modulo의 실효성이 드러난다).
+    "arcade_pop": {
+        "id": "arcade_pop",
+        "nameLabel": "Arcade Pop",
+        "type": "hybrid",
+        "slotCount": 35,
+        "recommendedMaxApps": 35,
+        "optIn": False,
+        "previewSlots": (0, 14),  # C3, C5
+        "descriptionLabel": "Pulse 50% 사각파. 고전 아케이드의 경쾌한 톤.",
+        "freqs": BEEP_TABLE,  # classic과 음정 동일, 파형만 교체
+        "waveform": "pulse50",
+        "durationMs": 50,
+        "gapMs": 100,
+        "suppressRepeat": False,
+        "octaveVariation": False,
+        "gain": 1.0,
+    },
+    "coin_dash": {
+        "id": "coin_dash",
+        "nameLabel": "Coin Dash",
+        "type": "hybrid",
+        "slotCount": 35,
+        "recommendedMaxApps": 35,
+        "optIn": False,
+        "previewSlots": (0, 14),
+        "descriptionLabel": "Pulse 25% 얇은 사각파. 코인 획득 느낌의 맑고 짧은 톤.",
+        "freqs": BEEP_TABLE,
+        "waveform": "pulse25",
+        "durationMs": 50,
+        "gapMs": 100,
+        "suppressRepeat": False,
+        "octaveVariation": False,
+        "gain": 1.0,
+    },
+    "soft_retro": {
+        "id": "soft_retro",
+        "nameLabel": "Soft Retro",
+        "type": "hybrid",
+        "slotCount": 35,
+        "recommendedMaxApps": 35,
+        "optIn": False,
+        "previewSlots": (0, 14),
+        "descriptionLabel": "삼각파. 부드럽고 따뜻한 8비트 배경음 느낌.",
+        "freqs": BEEP_TABLE,
+        "waveform": "triangle",
+        "durationMs": 50,
+        "gapMs": 100,
+        "suppressRepeat": False,
+        "octaveVariation": False,
+        "gain": 1.0,
+    },
 }
 
 

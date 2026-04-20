@@ -27,6 +27,10 @@ from logHandler import log
 from . import settings
 from .constants import CLASSIC_PRESET_ID, PRESETS, SCOPE_APP, SCOPE_WINDOW
 
+# synthEngine / nvwave는 지연 import로 감쌈. NVDA 외 환경(단위 테스트)에서는
+# nvwave가 없어도 tones.beep 경로만 타면 import 없이 동작. 지연 import 실패는
+# 해당 호출에서 tones.beep 폴백으로 흡수.
+
 # duration/gap_ms 기본값 상수는 두지 않는다. settings.CONFSPEC(settings.py)이
 # 사용자 조정 가능한 단일 SoT이며, matcher가 항상 settings.get()으로 주입한다.
 # 기본값 조정이 필요하면 settings.CONFSPEC의 default=... 한 곳만 고친다.
@@ -56,8 +60,54 @@ def _get_active_preset() -> dict:
     return preset
 
 
-def _schedule_second_beep(freq: int, duration: int, gap_ms: int) -> None:
-    """gap_ms 뒤에 tones.beep을 호출한다.
+def _play_via_synth(freq: int, duration: int, waveform: str) -> None:
+    """synthEngine으로 wav 파일 생성 후 nvwave로 비동기 재생. 실패 시 tones.beep 폴백.
+
+    호출 경로: Phase 3 이후 프리셋 메타에 `waveform` 키가 있을 때만 진입.
+    기존 classic/pentatonic/fifths(waveform 메타 없음)는 tones.beep 경로.
+
+    **중요**: `nvwave.playWaveFile`은 파일 경로 문자열만 받는다
+    (`NVDA/source/nvwave.py:82-155`의 `os.path.basename(fileName)`). 따라서
+    `synthEngine.render_wav()`는 BytesIO가 아닌 **파일 경로**를 반환하도록 구현됨.
+    같은 (waveform, freq, duration) 조합이면 동일 경로라 디스크 I/O는 첫 호출만.
+
+    폴백 정책 (절대 침묵 금지):
+        - synthEngine import 실패(모듈 누락 등): tones.beep(freq) 단순 재생
+        - nvwave import 실패: tones.beep 폴백
+        - nvwave.playWaveFile 예외(오디오 서비스 중단/디바이스 점유): tones.beep 폴백
+    """
+    try:
+        from . import synthEngine
+        import nvwave
+    except Exception:
+        log.exception("mtwn: synth import failed, falling back to tones.beep")
+        tones.beep(freq, duration)
+        return
+    try:
+        wav_path = synthEngine.render_wav(waveform, freq, duration)
+        # asynchronous=True — event_gainFocus 블로킹 방지. NVDA 내부는
+        # 다음 호출이 이 재생을 stop()으로 인터럽트(단일 player 구조).
+        nvwave.playWaveFile(wav_path, asynchronous=True)
+    except Exception:
+        log.exception(
+            f"mtwn: nvwave play failed (waveform={waveform!r}, freq={freq}), "
+            f"falling back to tones.beep"
+        )
+        tones.beep(freq, duration)
+
+
+def _play_one_beep(freq: int, duration: int, waveform) -> None:
+    """단음 재생. waveform이 None이면 tones.beep, 그 외는 synthEngine+nvwave."""
+    if waveform is None:
+        tones.beep(freq, duration)
+    else:
+        _play_via_synth(freq, duration, waveform)
+
+
+def _schedule_second_beep(
+    freq: int, duration: int, gap_ms: int, waveform=None
+) -> None:
+    """gap_ms 뒤에 단음 재생을 예약.
 
     NVDA `core.callLater`(core.py:1187-1202)는 `wx.GetApp() is None`일 때만
     NVDANotInitializedError를 던지는데, GlobalPlugin이 실행되는 시점엔 wx.App이
@@ -66,10 +116,12 @@ def _schedule_second_beep(freq: int, duration: int, gap_ms: int) -> None:
 
     상위 이벤트 훅(`__init__.py`의 event_* 3종)이 이미 try/except로 예외를
     흡수하지만, 컨텍스트 마커 보존을 위해 여기서도 log.exception 한 겹만 유지.
+
+    waveform=None(기본)이면 기존 tones.beep 경로, 아니면 synthEngine 경로로 분기.
     """
     try:
         import core
-        core.callLater(gap_ms, tones.beep, freq, duration)
+        core.callLater(gap_ms, _play_one_beep, freq, duration, waveform)
     except Exception:
         log.exception("mtwn: second beep scheduling failed")
 
@@ -101,6 +153,7 @@ def play_beep(
     preset = _get_active_preset()
     freqs = preset["freqs"]
     size = preset["slotCount"]
+    waveform = preset.get("waveform")  # None이면 tones.beep 경로(classic 계열)
 
     if not (0 <= app_idx < size):
         log.warning(
@@ -110,7 +163,7 @@ def play_beep(
         return
 
     a_freq = freqs[app_idx]
-    tones.beep(a_freq, duration)
+    _play_one_beep(a_freq, duration, waveform)
 
     # scope=app 또는 tab_idx 부재 → 단음 종료.
     if scope == SCOPE_APP or tab_idx is None:
@@ -123,7 +176,7 @@ def play_beep(
         return
 
     b_freq = freqs[tab_idx]
-    _schedule_second_beep(b_freq, duration, gap_ms)
+    _schedule_second_beep(b_freq, duration, gap_ms, waveform)
 
 
 def play_preview(preset_id: str, duration: int, gap_ms: int) -> None:
@@ -151,11 +204,12 @@ def play_preview(preset_id: str, duration: int, gap_ms: int) -> None:
 
     freqs = preset["freqs"]
     size = preset["slotCount"]
+    waveform = preset.get("waveform")
     slot_a, slot_b = preset["previewSlots"]
     # previewSlots는 모듈 로드 시 assert로 검증되므로 범위 밖 케이스는 없음.
     # 그래도 방어적으로 clamp (하위 프리셋이 수동 편집됐을 가능성).
     slot_a = max(0, min(size - 1, slot_a))
     slot_b = max(0, min(size - 1, slot_b))
 
-    tones.beep(freqs[slot_a], duration)
-    _schedule_second_beep(freqs[slot_b], duration, gap_ms)
+    _play_one_beep(freqs[slot_a], duration, waveform)
+    _schedule_second_beep(freqs[slot_b], duration, gap_ms, waveform)
