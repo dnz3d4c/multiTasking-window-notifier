@@ -122,6 +122,53 @@ WAVEFORMS = {
 
 
 # ---------------------------------------------------------------------
+# 엔벨로프 — (i: int, n_samples: int) → amplitude_scale ∈ [0, 1]
+# Phase 4 synthSpecs에서 드럼/타악/만화풍 효과를 위해 사용.
+# ---------------------------------------------------------------------
+
+
+def _env_exp_decay(i: int, n_samples: int) -> float:
+    """빠른 지수 감쇠. 드럼 타격/킥/스내어 등 짧은 임펄스용.
+
+    duration 경과 시점에 exp(-4) ≈ 0.018 수준으로 거의 무음. 전체 소리가
+    "쿵/틱" 같은 타격 느낌.
+    """
+    if n_samples <= 0:
+        return 0.0
+    return math.exp(-4.0 * i / n_samples)
+
+
+def _env_pluck(i: int, n_samples: int) -> float:
+    """5% 어택 + 지수 감쇠. 물방울/코인/짧은 픽업 느낌."""
+    if n_samples <= 0:
+        return 0.0
+    attack_end = int(0.05 * n_samples)
+    if attack_end <= 0:
+        return math.exp(-4.0 * i / n_samples)
+    if i < attack_end:
+        return i / attack_end
+    return math.exp(-4.0 * (i - attack_end) / (n_samples - attack_end))
+
+
+def _env_boing(i: int, n_samples: int) -> float:
+    """바운스 — 감쇠 진동. 만화풍 "뾰용" 느낌.
+
+    주파수가 본 파형에 있으니 엔벨로프 쪽은 저속(3Hz) 진폭 변조로 "통통 튐" 효과.
+    """
+    if n_samples <= 0:
+        return 0.0
+    t = i / n_samples
+    return math.cos(2.0 * math.pi * 3.0 * t) * math.exp(-3.0 * t)
+
+
+_ENVELOPES = {
+    "exp_decay": _env_exp_decay,
+    "pluck": _env_pluck,
+    "boing": _env_boing,
+}
+
+
+# ---------------------------------------------------------------------
 # 캐시
 # ---------------------------------------------------------------------
 
@@ -265,6 +312,126 @@ def render_wav(
     with _cache_lock:
         if len(_cache) >= _CACHE_MAX:
             # FIFO 교체 + 오래된 파일 unlink 시도(실패 무시).
+            try:
+                old_key = next(iter(_cache))
+                old_path = _cache.pop(old_key)
+                try:
+                    os.unlink(old_path)
+                except Exception:
+                    pass
+            except StopIteration:
+                pass
+        _cache[key] = path
+    return path
+
+
+# ---------------------------------------------------------------------
+# synthSpecs 렌더링 (Phase 4) — 슬롯 = "짧은 SFX 한 덩이"
+# ---------------------------------------------------------------------
+
+
+def _render_spec_pcm(spec: dict, sample_rate: int) -> bytes:
+    """단일 synthSpec → PCM int16 LE bytes.
+
+    spec 지원 필드:
+        - waveform: "sine" | "square" | ... | "noise"  (기본 "sine")
+        - freq: 시작 주파수 Hz (기본 440). noise에선 무시.
+        - endFreq: 종료 주파수 (옵션). 설정 시 freq→endFreq 선형 portamento.
+        - durationMs: 재생 시간 (기본 50).
+        - envelope: "exp_decay" | "pluck" | "boing" (옵션). 미설정 시 상수 진폭.
+        - amp: 진폭 배율 [0, 1] (기본 1.0).
+
+    결정성: 같은 spec dict → 같은 PCM. noise 시드도 spec 필드 조합으로 고정.
+    """
+    waveform = spec.get("waveform", "sine")
+    start_freq = float(spec.get("freq", 440))
+    end_freq = float(spec.get("endFreq", start_freq))
+    duration_ms = int(spec.get("durationMs", 50))
+    envelope_name = spec.get("envelope")
+    amp_scale = float(spec.get("amp", 1.0))
+
+    n_samples = int(sample_rate * duration_ms / 1000)
+    if n_samples <= 0:
+        return b""
+
+    amp = int(_AMPLITUDE * amp_scale * 32767)
+    samples = array.array("h")
+    envelope_fn = _ENVELOPES.get(envelope_name) if envelope_name else None
+
+    if waveform == "noise":
+        seed = (
+            f"spec|noise|{start_freq}|{end_freq}|{duration_ms}|"
+            f"{envelope_name}|{amp_scale}|{sample_rate}"
+        )
+        rng = random.Random(seed)
+        for i in range(n_samples):
+            v = rng.uniform(-1.0, 1.0)
+            if envelope_fn is not None:
+                v *= envelope_fn(i, n_samples)
+            samples.append(int(v * amp))
+    else:
+        gen = WAVEFORMS.get(waveform)
+        if gen is None:
+            if waveform not in _warned_waveforms:
+                _warned_waveforms.add(waveform)
+                try:
+                    from logHandler import log as _log
+                    _log.warning(
+                        f"mtwn: unknown waveform={waveform!r}, "
+                        f"falling back to sine"
+                    )
+                except Exception:
+                    pass
+            gen = _gen_sine
+        # Portamento: freq를 선형 보간으로 주 루프에서 누적.
+        freq = start_freq
+        freq_step = (end_freq - start_freq) / n_samples if n_samples > 0 else 0.0
+        phase = 0.0
+        for i in range(n_samples):
+            phase_step = freq / sample_rate
+            v = gen(phase)
+            if envelope_fn is not None:
+                v *= envelope_fn(i, n_samples)
+            samples.append(int(v * amp))
+            phase += phase_step
+            if phase >= 1.0:
+                phase -= 1.0
+            freq += freq_step
+    return samples.tobytes()
+
+
+def _spec_cache_key(spec: dict, sample_rate: int):
+    """spec → 결정론적 튜플 키. dict 순서 무관하게 선정된 필드만 사용."""
+    return (
+        "spec",
+        spec.get("waveform", "sine"),
+        int(round(float(spec.get("freq", 440)))),
+        int(round(float(spec.get("endFreq", spec.get("freq", 440))))),
+        int(spec.get("durationMs", 50)),
+        spec.get("envelope"),
+        float(spec.get("amp", 1.0)),
+        int(sample_rate),
+    )
+
+
+def render_spec(spec: dict, sample_rate: int = SAMPLE_RATE) -> str:
+    """synthSpec 렌더링 + 파일 캐시. 반환은 wav 파일 경로.
+
+    `render_wav(waveform, freq, duration)`의 풀 기능 버전. synthSpecs 기반
+    프리셋(drum_kit/lazer_pack/eight_bit_jump 등)에서 사용.
+    """
+    key = _spec_cache_key(spec, sample_rate)
+
+    with _cache_lock:
+        if key in _cache:
+            return _cache[key]
+
+    path = _cache_path(key)
+    pcm = _render_spec_pcm(spec, sample_rate)
+    _write_wav_file(pcm, path, sample_rate)
+
+    with _cache_lock:
+        if len(_cache) >= _CACHE_MAX:
             try:
                 old_key = next(iter(_cache))
                 old_path = _cache.pop(old_key)

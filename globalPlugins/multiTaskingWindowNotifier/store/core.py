@@ -62,7 +62,6 @@ import os
 from logHandler import log
 
 from ..constants import (
-    BEEP_TABLE_SIZE,
     MAX_ITEMS,
     SCOPE_WINDOW,
 )
@@ -340,7 +339,7 @@ def get_app_beep_idx(list_path: str, appId: str):
     """
     state = _load_state(list_path)
     idx = state.get("appBeepMap", {}).get(appId)
-    if isinstance(idx, int) and 0 <= idx < BEEP_TABLE_SIZE:
+    if isinstance(idx, int) and 0 <= idx < MAX_ITEMS:
         return idx
     return None
 
@@ -357,7 +356,7 @@ def get_tab_beep_idx(list_path: str, key: str):
             if it.get("scope") != SCOPE_WINDOW:
                 return None
             idx = it.get("tabBeepIdx")
-            if isinstance(idx, int) and 0 <= idx < BEEP_TABLE_SIZE:
+            if isinstance(idx, int) and 0 <= idx < MAX_ITEMS:
                 return idx
             return None
     return None

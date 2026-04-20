@@ -32,11 +32,12 @@ from ..constants import (
     BEEP_TABLE_SIZE,
     BEEP_USABLE_SIZE,
     BEEP_USABLE_START,
+    MAX_ITEMS,
     SCOPE_WINDOW,
 )
 
 
-def _assign_next_idx(used, size: int = BEEP_TABLE_SIZE, start: int = 0) -> int:
+def _assign_next_idx(used, size: int = MAX_ITEMS, start: int = 0) -> int:
     """순차 인덱스 할당. used의 [start, start+size) 구간 값의 max+1 반환.
 
     used에 구간 내 값이 없으면 start. 포화(max+1 >= start+size)면 구간 내 wrap
@@ -99,18 +100,21 @@ def _ensure_beep_assignments(state: dict) -> bool:
     changed = False
 
     # ① + ②: appBeepMap 채우기. scope 관계없이 모든 entry의 appId에 대해 할당.
-    # v5부터 할당 구간을 [BEEP_USABLE_START, BEEP_USABLE_END)로 축소.
+    # Phase 4에서 할당 구간을 MAX_ITEMS=128 전체로 확대. 프리셋별 slotCount
+    # (Phase 4에서 8/16/20/24 등 가변)와 분리돼 "할당은 항상 0..127, 재생 시점에
+    # effective_idx = stored_idx % slotCount" 구조. 이로써 프리셋 왕복 시 stored
+    # idx가 보존되어 원복 가능. 포화 임계도 MAX_ITEMS 기준.
     for it in items:
         app_id = it.get("appId", "")
         if not app_id or app_id in app_beep_map:
             continue
         used = list(app_beep_map.values())
-        if len(set(used)) >= BEEP_USABLE_SIZE:
+        if len(set(used)) >= MAX_ITEMS:
             log.warning(
-                f"mtwn: appBeepMap saturated (>= {BEEP_USABLE_SIZE} usable slots), "
+                f"mtwn: appBeepMap saturated (>= {MAX_ITEMS} slots), "
                 f"appId={app_id!r} will share existing idx"
             )
-        new_idx = _assign_next_idx(used, size=BEEP_USABLE_SIZE, start=BEEP_USABLE_START)
+        new_idx = _assign_next_idx(used, size=MAX_ITEMS, start=0)
         app_beep_map[app_id] = new_idx
         changed = True
         log.info(f"mtwn: assign appBeepMap[{app_id!r}] = {new_idx}")
@@ -123,7 +127,9 @@ def _ensure_beep_assignments(state: dict) -> bool:
             continue
         app_id = it.get("appId", "")
         existing = it.get("tabBeepIdx")
-        if isinstance(existing, int) and 0 <= existing < BEEP_TABLE_SIZE:
+        # Phase 4: stored idx 범위 검증도 MAX_ITEMS 기준. 구 BEEP_TABLE_SIZE(=35)
+        # 로 등록된 기존 데이터는 여전히 [0, 35) 안에 있으므로 검증 통과.
+        if isinstance(existing, int) and 0 <= existing < MAX_ITEMS:
             tab_idx_by_app.setdefault(app_id, []).append(existing)
     for it in items:
         if it.get("scope") != SCOPE_WINDOW:
@@ -132,13 +138,13 @@ def _ensure_beep_assignments(state: dict) -> bool:
             continue
         app_id = it.get("appId", "")
         used = tab_idx_by_app.setdefault(app_id, [])
-        if len(set(used)) >= BEEP_USABLE_SIZE:
+        if len(set(used)) >= MAX_ITEMS:
             log.warning(
                 f"mtwn: tabBeepIdx saturated for appId={app_id!r} "
-                f"(>= {BEEP_USABLE_SIZE} usable slots), "
+                f"(>= {MAX_ITEMS} slots), "
                 f"key={it.get('key')!r} will share existing idx"
             )
-        new_idx = _assign_next_idx(used, size=BEEP_USABLE_SIZE, start=BEEP_USABLE_START)
+        new_idx = _assign_next_idx(used, size=MAX_ITEMS, start=0)
         it["tabBeepIdx"] = new_idx
         used.append(new_idx)
         changed = True

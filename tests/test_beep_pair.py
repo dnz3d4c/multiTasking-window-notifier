@@ -80,22 +80,32 @@ def test_scope_window_without_tab_idx_is_single_beep(mock_tones, mock_call_later
     assert mock_tones[0] == ("beep", BEEP_TABLE[7], 50)
 
 
-def test_app_idx_out_of_range_is_silent(mock_tones, mock_call_later):
-    """app_idx 범위 밖이면 경고 로그 + 무음."""
+def test_app_idx_wraps_via_modulo(mock_tones, mock_call_later):
+    """Phase 4: app_idx가 slotCount를 넘으면 modulo wrap으로 매핑.
+
+    할당 공간은 MAX_ITEMS=128이고 classic 프리셋 slotCount=35이므로
+    stored=999는 재생 시점에 999 % 35 = 19번 슬롯으로 재생된다. 무음이 아니라
+    "두 번째 사이클 슬롯"이라는 해석 — 기존 사용자 학습이 점차 공유되는
+    트레이드오프를 받아들인 구조.
+    """
     beepPlayer.play_beep(999, tab_idx=0, scope=SCOPE_WINDOW,
                          duration=50, gap_ms=100)
 
-    assert mock_tones == []
+    # app_idx=999 % 35 = 19, tab_idx=0 → 2음 재생.
+    assert len(mock_tones) == 2
+    assert mock_tones[0] == ("beep", BEEP_TABLE[19], 50)
+    assert mock_tones[1] == ("beep", BEEP_TABLE[0], 50)
 
 
-def test_tab_idx_out_of_range_falls_back_to_single(mock_tones, mock_call_later):
-    """tab_idx가 범위 밖이면 경고 + 단음 (app 비프는 발사)."""
+def test_tab_idx_wraps_via_modulo(mock_tones, mock_call_later):
+    """Phase 4: tab_idx도 modulo wrap. 단음 폴백 없음."""
     beepPlayer.play_beep(10, tab_idx=999, scope=SCOPE_WINDOW,
                          duration=50, gap_ms=15)
 
-    # a는 이미 재생됐고 b는 생략.
-    assert len(mock_tones) == 1
+    # tab_idx=999 % 35 = 19, 2음 정상 재생.
+    assert len(mock_tones) == 2
     assert mock_tones[0] == ("beep", BEEP_TABLE[10], 50)
+    assert mock_tones[1] == ("beep", BEEP_TABLE[19], 50)
 
 
 def test_scope_app_does_not_schedule_second_beep(mock_tones, mock_call_later):

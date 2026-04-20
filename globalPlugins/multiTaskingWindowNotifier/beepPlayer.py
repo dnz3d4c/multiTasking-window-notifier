@@ -104,6 +104,47 @@ def _play_one_beep(freq: int, duration: int, waveform) -> None:
         _play_via_synth(freq, duration, waveform)
 
 
+def _play_spec(spec: dict) -> None:
+    """Phase 4 synthSpec 재생. synthEngine.render_spec + nvwave + tones 폴백.
+
+    spec의 durationMs/freq를 사용 — 사용자 settings 값은 무시(프리셋이 슬롯별로
+    자체 duration을 정의). 폴백 시엔 spec.freq + spec.durationMs로 tones.beep.
+    """
+    try:
+        from . import synthEngine
+        import nvwave
+    except Exception:
+        log.exception("mtwn: synth import failed, falling back to tones.beep")
+        # spec.freq는 noise 슬롯에서 0이고, tones.beep은 0Hz에서 에러/무음 가능.
+        # 방어로 0/None 시 기본 음 440Hz. waveform=noise 슬롯의 폴백은 "노이즈를
+        # 흉내 못 하지만 최소한 소리는 난다" 수준이 목표.
+        fallback_freq = int(spec.get("freq", 440)) or 440
+        tones.beep(fallback_freq, int(spec.get("durationMs", 50)))
+        return
+    try:
+        wav_path = synthEngine.render_spec(spec)
+        nvwave.playWaveFile(wav_path, asynchronous=True)
+    except Exception:
+        log.exception(
+            f"mtwn: nvwave play failed (spec kind={spec.get('kind')!r}), "
+            f"falling back to tones.beep"
+        )
+        # spec.freq는 noise 슬롯에서 0이고, tones.beep은 0Hz에서 에러/무음 가능.
+        # 방어로 0/None 시 기본 음 440Hz. waveform=noise 슬롯의 폴백은 "노이즈를
+        # 흉내 못 하지만 최소한 소리는 난다" 수준이 목표.
+        fallback_freq = int(spec.get("freq", 440)) or 440
+        tones.beep(fallback_freq, int(spec.get("durationMs", 50)))
+
+
+def _schedule_second_spec(spec: dict, gap_ms: int) -> None:
+    """gap_ms 뒤에 _play_spec 예약. _schedule_second_beep의 spec 버전."""
+    try:
+        import core
+        core.callLater(gap_ms, _play_spec, spec)
+    except Exception:
+        log.exception("mtwn: second spec scheduling failed")
+
+
 def _schedule_second_beep(
     freq: int, duration: int, gap_ms: int, waveform=None
 ) -> None:
@@ -151,31 +192,54 @@ def play_beep(
         - SCOPE_WINDOW + tab_idx: a 즉시 재생 → `core.callLater(gap_ms, beep, b)`.
     """
     preset = _get_active_preset()
-    freqs = preset["freqs"]
     size = preset["slotCount"]
-    waveform = preset.get("waveform")  # None이면 tones.beep 경로(classic 계열)
 
-    if not (0 <= app_idx < size):
+    # Phase 4: stored idx가 MAX_ITEMS(=128) 공간에 있고 프리셋 slotCount는 가변
+    # (Drum Kit=8 등). 재생 시점 modulo wrap으로 현재 프리셋 범위에 맞춤.
+    # stored idx 자체는 보존되므로 프리셋 왕복 시 원복 가능. 음수 방어는 Python
+    # 의 % 연산자가 양수 결과 보장(-1 % 35 == 34).
+    if not isinstance(app_idx, int) or size <= 0:
         log.warning(
-            f"mtwn: play_beep app_idx={app_idx} out of range (0..{size - 1}) "
+            f"mtwn: play_beep invalid app_idx={app_idx!r} or slotCount={size} "
             f"for preset={preset['id']!r}"
         )
         return
+    effective_app_idx = app_idx % size
 
-    a_freq = freqs[app_idx]
+    synth_specs = preset.get("synthSpecs")
+    if synth_specs is not None:
+        # Phase 4 synthSpecs 경로 (drum_kit/lazer_pack/eight_bit_jump).
+        # 각 슬롯이 자체 durationMs/envelope를 가지므로 호출자 duration/gap_ms 중
+        # gap_ms만 사용. duration은 spec에 내장.
+        _play_spec(synth_specs[effective_app_idx])
+        if scope == SCOPE_APP or tab_idx is None:
+            return
+        if not isinstance(tab_idx, int):
+            log.warning(f"mtwn: play_beep invalid tab_idx={tab_idx!r}")
+            return
+        effective_tab_idx = tab_idx % size
+        _schedule_second_spec(synth_specs[effective_tab_idx], gap_ms)
+        return
+
+    # freqs 경로 (classic/pentatonic/fifths/arcade_pop/coin_dash/soft_retro).
+    freqs = preset["freqs"]
+    waveform = preset.get("waveform")  # None이면 tones.beep 경로(classic 계열)
+
+    a_freq = freqs[effective_app_idx]
     _play_one_beep(a_freq, duration, waveform)
 
     # scope=app 또는 tab_idx 부재 → 단음 종료.
     if scope == SCOPE_APP or tab_idx is None:
         return
-    if not (0 <= tab_idx < size):
+    if not isinstance(tab_idx, int):
         log.warning(
-            f"mtwn: play_beep tab_idx={tab_idx} out of range (0..{size - 1}) "
-            f"for preset={preset['id']!r}, falling back to single beep"
+            f"mtwn: play_beep invalid tab_idx={tab_idx!r}, "
+            f"falling back to single beep"
         )
         return
+    effective_tab_idx = tab_idx % size
 
-    b_freq = freqs[tab_idx]
+    b_freq = freqs[effective_tab_idx]
     _schedule_second_beep(b_freq, duration, gap_ms, waveform)
 
 
@@ -202,14 +266,21 @@ def play_preview(preset_id: str, duration: int, gap_ms: int) -> None:
             )
         preset = PRESETS[CLASSIC_PRESET_ID]
 
-    freqs = preset["freqs"]
     size = preset["slotCount"]
-    waveform = preset.get("waveform")
     slot_a, slot_b = preset["previewSlots"]
     # previewSlots는 모듈 로드 시 assert로 검증되므로 범위 밖 케이스는 없음.
     # 그래도 방어적으로 clamp (하위 프리셋이 수동 편집됐을 가능성).
     slot_a = max(0, min(size - 1, slot_a))
     slot_b = max(0, min(size - 1, slot_b))
 
+    synth_specs = preset.get("synthSpecs")
+    if synth_specs is not None:
+        # synthSpecs 프리셋 미리듣기 — 슬롯 spec 그대로 재생. gap은 인자 사용.
+        _play_spec(synth_specs[slot_a])
+        _schedule_second_spec(synth_specs[slot_b], gap_ms)
+        return
+
+    freqs = preset["freqs"]
+    waveform = preset.get("waveform")
     _play_one_beep(freqs[slot_a], duration, waveform)
     _schedule_second_beep(freqs[slot_b], duration, gap_ms, waveform)

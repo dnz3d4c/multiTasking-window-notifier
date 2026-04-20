@@ -355,15 +355,45 @@ NVDA 소스(`ext/nvda/source/`)와 프로젝트 소스를 교차 탐색해 "NVDA
 
 **차기**: Phase 4(synthSpecs + Percussive/Atonal 프리셋 3개), Phase 5(Daily Life + Humor Pack).
 
+### 비프 프리셋 확장 시리즈 Phase 4 (완료)
+
+**slotCount 가변 인프라 + synthSpecs 스키마 + Percussive/Atonal/Hybrid 프리셋 3개**. Phase 3 6프리셋에 이어 총 9프리셋(기본 포함).
+
+**인프라 변경**:
+- `store/assign.py`: `_assign_next_idx` 기본 `size=MAX_ITEMS=128`. `_ensure_beep_assignments` 호출도 동일. 할당 공간을 프리셋 slotCount와 분리 — 항상 0..127, 프리셋 왕복 시 stored idx 보존.
+- `store/core.py` / `store/io.py`: stored idx 범위 검증을 `< BEEP_TABLE_SIZE` → `< MAX_ITEMS`로 교체. 기존 사용자 데이터(v8, idx ≤ 34)는 여전히 유효 통과.
+- `beepPlayer.play_beep`: 재생 시점 `effective_idx = stored_idx % slotCount` modulo wrap. out-of-range silent/fallback 경로 제거(wrap이 대체). 관련 테스트 2건 의미 업데이트(`test_app_idx_wraps_via_modulo`, `test_tab_idx_wraps_via_modulo`).
+
+**synthSpecs 스키마**:
+- 프리셋 dict에 `synthSpecs: list[dict]` (freqs 대안). 각 슬롯 spec: `{kind, waveform, freq, endFreq?, durationMs, envelope?}`. 슬롯별 고유 duration/envelope/portamento.
+- `synthEngine.render_spec(spec)` — 파일 캐시 + nvwave 경로. `_render_spec_pcm`가 파형+엔벨로프+포르타멘토 조합 렌더링.
+- 엔벨로프 3종: `exp_decay`(타악), `pluck`(어택 5%+감쇠), `boing`(바운스 진동).
+- 포르타멘토: spec.endFreq 설정 시 freq → endFreq 선형 보간.
+- 부팅 assert: `freqs` 또는 `synthSpecs` 중 하나 필수 + 길이 == slotCount. synthSpecs 프리셋은 `octaveVariation=False` 강제(옥타브 개념 없음).
+- `beepPlayer._play_spec` / `_schedule_second_spec`: spec 재생 + tones.beep 폴백(freq=0 방어로 440Hz 기본).
+
+**신규 프리셋 3개**:
+- `drum_kit` — Percussive, 8슬롯. kick/snare/hihat_closed/hihat_open/clap/tom_low/tom_high/cymbal. sine+envelope 또는 noise+envelope. 권장 ≤8앱.
+- `lazer_pack` — Atonal, 16슬롯. freq 슬라이드 "뾰옹/퓨웅/뽀용" 만화 레이저 효과. pulse25/saw/triangle/square/pulse12 × 상승/하강/bounce. 권장 ≤16앱.
+- `eight_bit_jump` — Hybrid, 20슬롯. 10 pulse50 음계(pentatonic C3~A4) + 10 SFX(jump_up/jump_down/shoot/coin/power_up/damage/explosion/bump/star/life_up). 권장 ≤20앱.
+
+**실측**: spec 렌더 0.8~3.2ms cold, 캐시 히트 <1μs. 노이즈 + envelope 결정성 확인.
+
+**검증**:
+- NVDA Addon Development Specialist 리뷰 통과. Must fix 2건 반영(lazer_pack recommendedMaxApps 16 정정 + `_play_spec` freq=0 방어) + 개선 S3(synthSpecs는 octaveVariation=False 강제 assert).
+- 186 unit 테스트 전건 PASS. 빌드 23 files 76.9 KB.
+- **실기 검증 필요**: drum_kit/lazer_pack/eight_bit_jump 각각 선택 후 Alt+Tab 여러 번 눌러 슬롯별 SFX 청취.
+
+**차기**: Phase 5(Daily Life + Humor Pack). 진단 덤프 단축키 / recommendedMaxApps UI 경고는 Phase 5로 이월.
+
 ---
 
 ## 현재 로드맵
 
-### 비프 프리셋 확장 시리즈 (Phase 4~5, 진행 중)
+### 비프 프리셋 확장 시리즈 (Phase 5, 진행 중)
 
 상세 플랜: `C:\Users\advck\.claude\plans\gleaming-drifting-dragonfly.md`.
-- **Phase 4** — `synthSpecs` 스키마 도입(슬롯 = 짧은 SFX 한 덩이). Percussive/Atonal 프리셋 3개(Drum Kit 8슬롯 / Lazer Pack 16슬롯 / 8-Bit Jump 20슬롯). **이 단계에서 slotCount 가변 + 할당 공간 128 고정 + 재생 시점 modulo wrap 도입**(Phase 3에서 Phase 4로 이관한 인프라).
-- **Phase 5** — 일상 소리 프리셋(Daily Life 24슬롯) + 옵트인 Humor Pack(16슬롯, 1회성 경고). 방귀/트림/딸꾹질 등은 만화풍 PCM 합성으로만 구현.
+- **Phase 5** — 일상 소리 프리셋(Daily Life 24슬롯) + 옵트인 Humor Pack(16슬롯, 1회성 경고). 방귀/트림/딸꾹질 등은 만화풍 PCM 합성으로만 구현. 설정 패널에 `recommendedMaxApps` 경고 레이블 추가.
 
 ---
 

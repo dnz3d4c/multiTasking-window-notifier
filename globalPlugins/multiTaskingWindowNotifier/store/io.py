@@ -27,7 +27,6 @@ from logHandler import log
 
 from ..appIdentity import splitKey
 from ..constants import (
-    BEEP_TABLE_SIZE,
     MAX_ITEMS,
     SCOPE_APP,
     SCOPE_WINDOW,
@@ -135,7 +134,7 @@ def _load_from_json(json_path: str):
     for app_id, idx in raw_app_beep_map.items():
         if not isinstance(app_id, str):
             continue
-        if not isinstance(idx, int) or not (0 <= idx < BEEP_TABLE_SIZE):
+        if not isinstance(idx, int) or not (0 <= idx < MAX_ITEMS):
             log.warning(
                 f"mtwn: appBeepMap[{app_id!r}]={idx!r} invalid, will be reassigned"
             )
@@ -167,7 +166,7 @@ def _load_from_json(json_path: str):
             if k == "scope":
                 continue
             if k == "tabBeepIdx":
-                if scope == SCOPE_WINDOW and isinstance(v, int) and 0 <= v < BEEP_TABLE_SIZE:
+                if scope == SCOPE_WINDOW and isinstance(v, int) and 0 <= v < MAX_ITEMS:
                     meta["tabBeepIdx"] = v
                 continue
             if k == "aliases":

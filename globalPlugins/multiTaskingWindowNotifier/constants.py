@@ -246,6 +246,141 @@ PRESETS = {
         "octaveVariation": False,
         "gain": 1.0,
     },
+    # Phase 4: Percussive / Atonal / Hybrid(음계+SFX) 프리셋. `synthSpecs` 리스트가
+    # 각 슬롯에 "짧은 SFX 한 덩이"를 정의(freqs 대신). 슬롯별 waveform/endFreq/
+    # envelope/durationMs가 자체 지정되어 만화풍 다양성 달성. slotCount가 기존
+    # 35와 다르므로 modulo wrap이 재생 시점에 활성화된다.
+    "drum_kit": {
+        "id": "drum_kit",
+        "nameLabel": "Drum Kit",
+        "type": "percussive",
+        "slotCount": 8,
+        "recommendedMaxApps": 8,
+        "optIn": False,
+        "previewSlots": (0, 1),  # kick, snare
+        "descriptionLabel": "킥/스내어/하이햇/톰/심벌 등 8개 타악. 음계 없음, 권장 ≤8앱.",
+        "synthSpecs": [
+            {"kind": "kick", "waveform": "sine", "freq": 60,
+             "durationMs": 80, "envelope": "exp_decay"},
+            {"kind": "snare", "waveform": "noise", "freq": 0,
+             "durationMs": 100, "envelope": "exp_decay"},
+            {"kind": "hihat_closed", "waveform": "noise", "freq": 0,
+             "durationMs": 30, "envelope": "exp_decay"},
+            {"kind": "hihat_open", "waveform": "noise", "freq": 0,
+             "durationMs": 120, "envelope": "exp_decay"},
+            {"kind": "clap", "waveform": "noise", "freq": 0,
+             "durationMs": 60, "envelope": "exp_decay"},
+            {"kind": "tom_low", "waveform": "sine", "freq": 120, "endFreq": 80,
+             "durationMs": 120, "envelope": "exp_decay"},
+            {"kind": "tom_high", "waveform": "sine", "freq": 220, "endFreq": 160,
+             "durationMs": 100, "envelope": "exp_decay"},
+            {"kind": "cymbal", "waveform": "noise", "freq": 0,
+             "durationMs": 200, "envelope": "pluck"},
+        ],
+        "durationMs": 80,
+        "gapMs": 60,
+        "suppressRepeat": False,
+        "octaveVariation": False,
+        "gain": 1.0,
+    },
+    "lazer_pack": {
+        "id": "lazer_pack",
+        "nameLabel": "Lazer Pack",
+        "type": "atonal",
+        "slotCount": 16,
+        "recommendedMaxApps": 16,
+        "optIn": False,
+        "previewSlots": (0, 1),  # 상승 "뾰옹" → 하강 "퓨웅"
+        "descriptionLabel": "freq 슬라이드 16종. '뾰옹/퓨웅/뽀용' 만화 레이저 효과. 권장 ≤20앱.",
+        "synthSpecs": [
+            {"kind": "zap_up_fast", "waveform": "pulse25",
+             "freq": 800, "endFreq": 1600, "durationMs": 60, "envelope": "pluck"},
+            {"kind": "zap_down_fast", "waveform": "pulse25",
+             "freq": 1600, "endFreq": 800, "durationMs": 60, "envelope": "pluck"},
+            {"kind": "sweep_up_slow", "waveform": "saw",
+             "freq": 400, "endFreq": 2000, "durationMs": 100, "envelope": "pluck"},
+            {"kind": "sweep_down_slow", "waveform": "saw",
+             "freq": 2000, "endFreq": 400, "durationMs": 100, "envelope": "pluck"},
+            {"kind": "steady_mid", "waveform": "pulse25",
+             "freq": 1200, "durationMs": 80, "envelope": "pluck"},
+            {"kind": "glide_up_soft", "waveform": "triangle",
+             "freq": 300, "endFreq": 900, "durationMs": 80, "envelope": "pluck"},
+            {"kind": "glide_down_soft", "waveform": "triangle",
+             "freq": 900, "endFreq": 300, "durationMs": 80, "envelope": "pluck"},
+            {"kind": "thin_zap_up", "waveform": "pulse12",
+             "freq": 600, "endFreq": 1800, "durationMs": 50, "envelope": "exp_decay"},
+            {"kind": "thin_zap_down", "waveform": "pulse12",
+             "freq": 1800, "endFreq": 600, "durationMs": 50, "envelope": "exp_decay"},
+            {"kind": "bounce_long", "waveform": "saw",
+             "freq": 500, "durationMs": 150, "envelope": "boing"},
+            {"kind": "bounce_up", "waveform": "pulse25",
+             "freq": 400, "endFreq": 1200, "durationMs": 100, "envelope": "boing"},
+            {"kind": "low_rise", "waveform": "square",
+             "freq": 200, "endFreq": 400, "durationMs": 80, "envelope": "pluck"},
+            {"kind": "low_fall", "waveform": "square",
+             "freq": 400, "endFreq": 200, "durationMs": 80, "envelope": "pluck"},
+            {"kind": "wide_fall", "waveform": "pulse25",
+             "freq": 2500, "endFreq": 500, "durationMs": 120, "envelope": "pluck"},
+            {"kind": "wide_rise", "waveform": "pulse25",
+             "freq": 500, "endFreq": 2500, "durationMs": 120, "envelope": "pluck"},
+            {"kind": "bounce_mid", "waveform": "pulse25",
+             "freq": 1000, "durationMs": 200, "envelope": "boing"},
+        ],
+        "durationMs": 80,
+        "gapMs": 60,
+        "suppressRepeat": False,
+        "octaveVariation": False,
+        "gain": 1.0,
+    },
+    "eight_bit_jump": {
+        "id": "eight_bit_jump",
+        "nameLabel": "8-Bit Jump",
+        "type": "hybrid",
+        "slotCount": 20,
+        "recommendedMaxApps": 20,
+        "optIn": False,
+        "previewSlots": (0, 10),  # 음계 음 → 점프 SFX
+        "descriptionLabel": "10개 pulse 음계 + 10개 만화 SFX(점프/코인/파워업/폭발 등). 권장 ≤20앱.",
+        "synthSpecs": [
+            # 0~9: pulse50 음계 (pentatonic 저역 10음).
+            {"kind": "note_c3", "waveform": "pulse50", "freq": 130, "durationMs": 70},
+            {"kind": "note_d3", "waveform": "pulse50", "freq": 146, "durationMs": 70},
+            {"kind": "note_e3", "waveform": "pulse50", "freq": 164, "durationMs": 70},
+            {"kind": "note_g3", "waveform": "pulse50", "freq": 196, "durationMs": 70},
+            {"kind": "note_a3", "waveform": "pulse50", "freq": 220, "durationMs": 70},
+            {"kind": "note_c4", "waveform": "pulse50", "freq": 261, "durationMs": 70},
+            {"kind": "note_d4", "waveform": "pulse50", "freq": 293, "durationMs": 70},
+            {"kind": "note_e4", "waveform": "pulse50", "freq": 329, "durationMs": 70},
+            {"kind": "note_g4", "waveform": "pulse50", "freq": 392, "durationMs": 70},
+            {"kind": "note_a4", "waveform": "pulse50", "freq": 440, "durationMs": 70},
+            # 10~19: 만화 SFX.
+            {"kind": "jump_up", "waveform": "pulse50",
+             "freq": 440, "endFreq": 880, "durationMs": 80, "envelope": "pluck"},
+            {"kind": "jump_down", "waveform": "pulse50",
+             "freq": 880, "endFreq": 440, "durationMs": 80, "envelope": "pluck"},
+            {"kind": "shoot", "waveform": "pulse25",
+             "freq": 1500, "endFreq": 500, "durationMs": 60, "envelope": "exp_decay"},
+            {"kind": "coin", "waveform": "pulse50",
+             "freq": 700, "endFreq": 1000, "durationMs": 60, "envelope": "pluck"},
+            {"kind": "power_up", "waveform": "pulse25",
+             "freq": 300, "endFreq": 900, "durationMs": 120, "envelope": "pluck"},
+            {"kind": "damage", "waveform": "noise", "freq": 0,
+             "durationMs": 80, "envelope": "exp_decay"},
+            {"kind": "explosion", "waveform": "noise", "freq": 0,
+             "durationMs": 150, "envelope": "exp_decay"},
+            {"kind": "bump", "waveform": "sine", "freq": 80,
+             "durationMs": 60, "envelope": "exp_decay"},
+            {"kind": "star", "waveform": "triangle",
+             "freq": 880, "endFreq": 2093, "durationMs": 150, "envelope": "pluck"},
+            {"kind": "life_up", "waveform": "saw",
+             "freq": 400, "endFreq": 1200, "durationMs": 100, "envelope": "boing"},
+        ],
+        "durationMs": 80,
+        "gapMs": 80,
+        "suppressRepeat": False,
+        "octaveVariation": False,
+        "gain": 1.0,
+    },
 }
 
 
@@ -256,9 +391,28 @@ for _pid, _p in PRESETS.items():
     assert 1 <= _p["slotCount"] <= MAX_ITEMS, (
         f"preset {_pid!r} slotCount={_p['slotCount']} out of 1..{MAX_ITEMS}"
     )
-    assert len(_p["freqs"]) == _p["slotCount"], (
-        f"preset {_pid!r} freqs len={len(_p['freqs'])} != slotCount={_p['slotCount']}"
+    # Phase 4: freqs(tonal/hybrid) 또는 synthSpecs(percussive/atonal) 중 하나는
+    # 반드시 존재하고 slotCount와 길이가 일치해야 한다.
+    _freqs = _p.get("freqs")
+    _specs = _p.get("synthSpecs")
+    assert (_freqs is not None) or (_specs is not None), (
+        f"preset {_pid!r} must have either freqs or synthSpecs"
     )
+    if _freqs is not None:
+        assert len(_freqs) == _p["slotCount"], (
+            f"preset {_pid!r} freqs len={len(_freqs)} != slotCount={_p['slotCount']}"
+        )
+    if _specs is not None:
+        assert len(_specs) == _p["slotCount"], (
+            f"preset {_pid!r} synthSpecs len={len(_specs)} != slotCount={_p['slotCount']}"
+        )
+        # synthSpec 슬롯은 "짧은 SFX 한 덩이"라 옥타브 개념이 없다. matcher의
+        # 옥타브 변주(±7 clip)는 tonal/hybrid의 freqs 기반에서만 의미를 가지므로,
+        # synthSpecs 프리셋은 반드시 octaveVariation=False여야 한다. 오타 방어.
+        assert _p.get("octaveVariation") is False, (
+            f"preset {_pid!r} has synthSpecs but octaveVariation={_p.get('octaveVariation')!r} — "
+            f"synthSpec 슬롯엔 옥타브 개념이 없어 항상 False여야 한다"
+        )
     for _ps in _p["previewSlots"]:
         assert 0 <= _ps < _p["slotCount"], (
             f"preset {_pid!r} previewSlot {_ps} out of 0..{_p['slotCount'] - 1}"
