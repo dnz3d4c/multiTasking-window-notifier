@@ -16,11 +16,14 @@ NVDA `nvwave.playWaveFile`은 **문자열 파일 경로만** 받고 BytesIO/byte
 경로 저장. 재시작 시 잔존 파일은 OS temp 청소가 정리.
 
 ## 생성 파형
-- sine / square(pulse50) / pulse25 / pulse12 / triangle / saw
+- triangle — hybrid 프리셋(soft_retro)이 사용
+- sine — 미지 파형 폴백용
 
 Phase 4~6에서 운용하던 `synthSpecs`/`_ENVELOPES`/noise/portamento/noiseLpfHz
-경로는 Phase 7.2에서 전면 철거. 현재 애드온이 운용하는 프리셋 집합이 전부
-단순 파형 + freqs 구조로 수렴해 합성기도 같은 단순성으로 정렬한다(YAGNI).
+경로는 Phase 7.2에서 전면 철거. Phase 8에서는 pulse50/pulse25/pulse12/square/saw
+도 제거 — 사용자 피드백 "날카롭다"로 이들을 쓰던 hybrid 프리셋(arcade_pop/
+coin_dash/glass_step)이 모두 철회됨. 현재 유일한 hybrid는 triangle 기반
+soft_retro뿐이라 합성기도 그 스펙에 맞춰 축소(YAGNI).
 
 ## 성능 전략
 - sine은 `math.sin` 호출을 정적 룩업 테이블(1024 entries) + 위상 누적으로 대체.
@@ -82,15 +85,11 @@ def _edge_ramp(i: int, n_samples: int, sample_rate: int) -> float:
 
 # Phase 6 §2: 파형별 crest factor 역보정. 같은 peak에서 sine(RMS 0.707)과 square
 # (RMS 1.0)이 체감 +3dB 차이 → 각 파형에 대응 스케일 적용으로 라우드니스 균일화.
-# pulse12와 pulse25는 고조파 집중으로 귀 민감대(2~4kHz)에 에너지 몰림 → 추가 감쇠.
+# Phase 8에서 pulse/saw 계열 프리셋 철회 이후 남은 파형은 triangle 하나.
+# sine은 미지 파형 폴백용으로만 유지.
 _WAVEFORM_GAIN = {
     "sine": 1.00,
     "triangle": 0.95,
-    "pulse50": 0.55,
-    "square": 0.55,
-    "pulse25": 0.50,
-    "pulse12": 0.40,
-    "saw": 0.55,
 }
 
 # Precomputed sine table. 1024개 sample이면 표준 tones 대역(130~4000Hz)에서
@@ -119,21 +118,6 @@ def _gen_sine(phase: float) -> float:
     return _sine_at(phase)
 
 
-def _gen_square(phase: float) -> float:
-    """Pulse 50% (사각파). NES Pulse1/Pulse2의 기본 듀티."""
-    return 1.0 if phase < 0.5 else -1.0
-
-
-def _gen_pulse25(phase: float) -> float:
-    """Pulse 25% — NES 특유의 얇고 밝은 듀티."""
-    return 1.0 if phase < 0.25 else -1.0
-
-
-def _gen_pulse12(phase: float) -> float:
-    """Pulse 12.5% — 더 얇고 찢어지는 톤."""
-    return 1.0 if phase < 0.125 else -1.0
-
-
 def _gen_triangle(phase: float) -> float:
     """삼각파. NES Triangle 채널처럼 둥글고 부드러운 톤."""
     # 0..0.5: -1 → 1 상승, 0.5..1: 1 → -1 하강.
@@ -142,19 +126,12 @@ def _gen_triangle(phase: float) -> float:
     return 3.0 - 4.0 * phase
 
 
-def _gen_saw(phase: float) -> float:
-    """톱니파. 화려하고 거친 톤. 배음 풍부."""
-    return 2.0 * phase - 1.0
-
-
+# Phase 8: pulse50/pulse25/pulse12/square/saw 파형 제거. 사용자 피드백("날카롭다")
+# 으로 해당 파형을 쓰던 hybrid 프리셋(arcade_pop/coin_dash/glass_step) 전부 철회.
+# soft_retro(triangle)만 남은 hybrid. sine은 미지 파형 폴백용으로 유지.
 WAVEFORMS = {
     "sine": _gen_sine,
-    "square": _gen_square,
-    "pulse50": _gen_square,  # square의 별칭
-    "pulse25": _gen_pulse25,
-    "pulse12": _gen_pulse12,
     "triangle": _gen_triangle,
-    "saw": _gen_saw,
 }
 
 

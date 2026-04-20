@@ -181,7 +181,7 @@ multiTaskingWindowNotifier/
         │   └── migrations.py              # app.list → JSON / title 정규화·dedup / v6→v7 clear 통합 (Phase 6.3)
         ├── tabClasses.py                  # 앱별 editor/overlay wcn 매핑 (상수 조회 전용)
         ├── windowInfo.py                  # 창 정보·경로 헬퍼 (title normalize 적용)
-        ├── synthEngine.py                 # PCM 파형 합성 + wav 파일 캐시 (render_wav + 기본 파형 7종 sine/square/pulse50/pulse25/pulse12/triangle/saw)
+        ├── synthEngine.py                 # PCM 파형 합성 + wav 파일 캐시 (render_wav + triangle, sine은 미지 파형 폴백용)
         ├── beepPlayer.py                  # 2음 비프 재생 조합 (classic 계열 tones.beep 경로 / hybrid waveform용 synthEngine+nvwave 경로)
         ├── listDialog.py                  # 목록 표시 wx.Dialog
         ├── settings.py                    # NVDA config 스키마 (confspec)

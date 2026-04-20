@@ -45,14 +45,20 @@ from .constants import BEEP_TABLE, MAX_ITEMS
 CLASSIC_PRESET_ID = "classic"
 
 
-# Phase 4~6에서 추가됐다가 Phase 7에서 철회된 프리셋 id들. 사용자 저장값에 남아
-# 있을 수 있어 마이그레이션이 감지한다. 새 철회 대상이 생기면 여기에 추가.
+# Phase 4~6 synthSpecs 5종(Phase 7에서 철회) + Phase 3/7.5 날카로운 hybrid 3종
+# (Phase 8에서 철회). 사용자 저장값에 남아 있을 수 있어 마이그레이션이 감지.
+# 새 철회 대상이 생기면 여기에 추가.
 _DEPRECATED_PRESET_IDS = frozenset({
+    # Phase 4~6 synthSpecs
     "drum_kit",
     "lazer_pack",
     "eight_bit_jump",
     "daily_life",
     "humor_pack",
+    # Phase 8: 날카로운 hybrid 파형 3종
+    "arcade_pop",
+    "coin_dash",
+    "glass_step",
 })
 
 
@@ -107,23 +113,9 @@ _A_MINOR_FREQS = [
 ]
 
 
-# Glass Step: whole-tone(C D E F# G# A#) × 6옥타브 - 최상단 1음 = 35.
-# C2(65Hz) ~ G#7(3322Hz). 반음이 완전 부재해 장/단조 어디에도 속하지 않는
-# "붕 뜬" 공간감. classic/moss_bell/fifths와 음정 구조 자체가 다르다.
-# 최상단 A#7(~3729Hz)은 상한 근접 + 쇳소리 경계라 제거.
-_WHOLE_TONE_FREQS = [
-    65, 73, 82, 92, 104, 117,           # C2 D2 E2 F#2 G#2 A#2
-    130, 146, 164, 185, 208, 233,       # C3 D3 E3 F#3 G#3 A#3
-    261, 293, 329, 370, 415, 466,       # C4 D4 E4 F#4 G#4 A#4
-    523, 587, 659, 740, 831, 932,       # C5 D5 E5 F#5 G#5 A#5
-    1047, 1175, 1319, 1480, 1661, 1865, # C6 D6 E6 F#6 G#6 A#6
-    2093, 2349, 2637, 2960, 3322,       # C7 D7 E7 F#7 G#7 (A#7 제거)
-]
-
-
 # ---------------------------------------------------------------------------
-# 프리셋 dict — Phase 7.5 기준 8개 (classic/pentatonic/fifths + arcade/coin/soft
-# + moss_bell/glass_step)
+# 프리셋 dict — Phase 8 기준 5개
+# (classic/pentatonic/fifths + soft_retro + moss_bell)
 # ---------------------------------------------------------------------------
 
 PRESETS = {
@@ -180,43 +172,12 @@ PRESETS = {
         "octaveVariation": False,
         "gain": 1.0,
     },
-    # Phase 3 Hybrid — nvwave + synthEngine.render_wav 경로. `waveform` 키
+    # Phase 3 hybrid — nvwave + synthEngine.render_wav 경로. `waveform` 키
     # 존재가 신 경로 진입 트리거. freqs는 BEEP_TABLE(C3~B7)을 공유해 음정 구조를
     # classic과 동일하게 유지하되 음색만 달라진다.
-    "arcade_pop": {
-        "id": "arcade_pop",
-        "nameLabel": "Arcade Pop",
-        "type": "hybrid",
-        "slotCount": 35,
-        "recommendedMaxApps": 35,
-        "optIn": False,
-        "previewSlots": (0, 14),  # C3, C5
-        "descriptionLabel": "Pulse 50% 사각파. 고전 아케이드의 경쾌한 톤.",
-        "freqs": BEEP_TABLE,  # classic과 음정 동일, 파형만 교체
-        "waveform": "pulse50",
-        "durationMs": 50,
-        "gapMs": 100,
-        "suppressRepeat": False,
-        "octaveVariation": False,
-        "gain": 1.0,
-    },
-    "coin_dash": {
-        "id": "coin_dash",
-        "nameLabel": "Coin Dash",
-        "type": "hybrid",
-        "slotCount": 35,
-        "recommendedMaxApps": 35,
-        "optIn": False,
-        "previewSlots": (0, 14),
-        "descriptionLabel": "Pulse 25% 얇은 사각파. 코인 획득 느낌의 맑고 짧은 톤.",
-        "freqs": BEEP_TABLE,
-        "waveform": "pulse25",
-        "durationMs": 50,
-        "gapMs": 100,
-        "suppressRepeat": False,
-        "octaveVariation": False,
-        "gain": 1.0,
-    },
+    # Phase 8: pulse50/pulse25 기반 프리셋(arcade_pop/coin_dash)은 날카로움 피드백
+    # 으로 제거. soft_retro(triangle)만 유지 — triangle은 배음 감쇠가 1/n²로
+    # 빠른 부드러운 파형.
     "soft_retro": {
         "id": "soft_retro",
         "nameLabel": "Soft Retro",
@@ -234,12 +195,10 @@ PRESETS = {
         "octaveVariation": False,
         "gain": 1.0,
     },
-    # Phase 7.5: 라인업의 빈 축을 채우는 tonal 2종. 다관점 토론으로 선정.
-    # moss_bell — 정서축(애조) 신규. classic/pentatonic/fifths가 모두 밝은 장조
-    # 또는 중립이라 애조가 비어있었다.
-    # glass_step — 파형축(saw) + 음정구조축(whole-tone) 동시 신규. 현 라인업
-    # 파형은 sine/pulse50/pulse25/triangle이라 saw 미사용, 음정은 전부 장조/
-    # 5음계/5도 진행이라 "장/단조 어디에도 속하지 않는" 구조가 비어있었다.
+    # Phase 7.5: 정서축(애조)을 채우는 tonal 신규. classic/pentatonic/fifths가
+    # 모두 밝은 장조 또는 중립이라 애조가 비어있었다.
+    # (Phase 8에서 같이 추가됐던 glass_step[saw/whole-tone]은 날카로움 피드백
+    # 으로 제거.)
     "moss_bell": {
         "id": "moss_bell",
         "nameLabel": "Moss Bell",
@@ -250,23 +209,6 @@ PRESETS = {
         "previewSlots": (0, 14),  # A2, A4
         "descriptionLabel": "A 자연단음계 7음 × 5옥타브. 차분한 애조.",
         "freqs": _A_MINOR_FREQS,
-        "durationMs": 50,
-        "gapMs": 100,
-        "suppressRepeat": False,
-        "octaveVariation": False,
-        "gain": 1.0,
-    },
-    "glass_step": {
-        "id": "glass_step",
-        "nameLabel": "Glass Step",
-        "type": "hybrid",
-        "slotCount": 35,
-        "recommendedMaxApps": 35,
-        "optIn": False,
-        "previewSlots": (0, 21),  # C2, F#5
-        "descriptionLabel": "whole-tone 6음 × 6옥타브, 톱니파. 차가운 디지털.",
-        "freqs": _WHOLE_TONE_FREQS,
-        "waveform": "saw",
         "durationMs": 50,
         "gapMs": 100,
         "suppressRepeat": False,
@@ -358,7 +300,7 @@ def migrate_deprecated_preset(section) -> None:
         if preset_id and is_deprecated(preset_id):
             log.warning(
                 f"mtwn: deprecated beepPreset={preset_id!r} migrated to "
-                f"{CLASSIC_PRESET_ID!r} (Phase 7 철회)"
+                f"{CLASSIC_PRESET_ID!r}"
             )
             section["beepPreset"] = CLASSIC_PRESET_ID
     except Exception:

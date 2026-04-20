@@ -75,8 +75,8 @@ def _ordered_preset_ids():
     """ListBox 항목 순서. PRESETS의 dict 삽입 순서를 그대로 쓴다.
 
     Python 3.7+는 dict 순서 보존이 보장되고 `presets.PRESETS`는 사용자 경험에
-    맞춰 classic→pentatonic→fifths→arcade_pop→coin_dash→soft_retro 순으로
-    정의돼 있다. 따라서 list(PRESETS) 만으로 표시 순서가 일관된다.
+    맞춰 classic→pentatonic→fifths→soft_retro→moss_bell 순으로 정의돼 있다.
+    따라서 list(PRESETS) 만으로 표시 순서가 일관된다.
     """
     return list(PRESETS.keys())
 

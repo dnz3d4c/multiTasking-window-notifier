@@ -12,9 +12,9 @@ v4 2차원 비프:
       충분히 변별된다.
 
 경로 분기:
-    - `preset["waveform"]` 미지정 → `tones.beep` (classic/pentatonic/fifths)
+    - `preset["waveform"]` 미지정 → `tones.beep` (classic/pentatonic/fifths/moss_bell)
     - `preset["waveform"]` 지정 → synthEngine.render_wav + nvwave
-      (arcade_pop/coin_dash/soft_retro 등 hybrid. Phase 7.5부터 glass_step도 포함)
+      (Phase 8 기준 hybrid는 soft_retro(triangle) 한 종)
 
 타이밍 원칙:
     - gap_ms는 NVDA `core.callLater`로 비동기 예약. 내부에서 wx.CallLater를
