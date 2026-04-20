@@ -196,13 +196,13 @@ def _save_to_disk(list_path: str, state: dict) -> bool:
         return False
 
     tmp = json_path + ".tmp"
-    # v8: scope=window/app 양쪽 entry에 `aliases: [str]` 필드 추가.
-    # 카카오톡처럼 Alt+Tab 오버레이 name과 foreground name이 다른 앱을 단일
-    # entry로 매칭하기 위함. v7 이하 파일은 _load_state 단계에서 모든 items에
-    # aliases=[] 주입 후 여기 도달해 v8로 승격 저장된다.
-    # 온음계 테이블(v7 도입)은 그대로 유지. 비프 인덱스 재배정 없음.
+    # v9: normalize_title 파이프라인 확장(em-dash 1순위 + 카운트 토큰 흡수)에
+    # 따른 일관성 보강. 데이터 스키마 자체는 v8과 동일(aliases 배열 보존)이며
+    # _load_state ⑥'' 단계가 aliases 재정규화 + 백업 1회 처리. 비프 인덱스
+    # 재배정/테이블 변경 없음. v7 이하 파일은 ⑥' ensure_aliases_v8를 거쳐
+    # 여기 도달.
     payload = {
-        "version": 8,
+        "version": 9,
         "appBeepMap": dict(state.get("appBeepMap", {})),
         "items": state["items"][:MAX_ITEMS],
     }

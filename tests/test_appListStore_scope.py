@@ -22,12 +22,12 @@ def _read_json(path):
 
 
 def test_save_writes_current_version(tmp_path):
-    """현 포맷(v8 aliases) 저장 확인. v7 이하는 로드 시 자동 승격."""
+    """현 포맷(v9 normalize_title 확장) 저장 확인. v8 이하는 로드 시 자동 승격."""
     path = _list_path(tmp_path)
     store.save(path, ["a|t1"])
     data = _read_json(_json_path(tmp_path))
-    assert data["version"] == 8
-    # v8: 모든 entry에 aliases 배열이 필드로 존재해야 한다.
+    assert data["version"] == 9
+    # v8 도입 aliases 배열은 v9에서도 모든 entry에 그대로 존재한다.
     assert data["items"][0]["aliases"] == []
 
 
@@ -99,8 +99,8 @@ def test_v2_file_loads_with_window_scope_injected(tmp_path):
 
 
 def test_v2_file_promotes_to_current_version_on_load(tmp_path):
-    """v2 로드 시 현재 포맷(v8)까지 단번에 승격:
-    scope 주입 + appBeepMap/tabBeepIdx 순차 할당 + aliases 필드 주입.
+    """v2 로드 시 현재 포맷(v9)까지 단번에 승격:
+    scope 주입 + appBeepMap/tabBeepIdx 순차 할당 + aliases 필드 주입 + title 재정규화.
     """
     json_path = _json_path(tmp_path)
     os.makedirs(os.path.dirname(json_path), exist_ok=True)
@@ -116,7 +116,7 @@ def test_v2_file_promotes_to_current_version_on_load(tmp_path):
     store.load(list_path)
 
     data = _read_json(json_path)
-    assert data["version"] == 8
+    assert data["version"] == 9
     # 저장된 항목에 scope 필드 + tabBeepIdx + aliases=[] 채워짐
     assert data["items"][0]["scope"] == SCOPE_WINDOW
     assert isinstance(data["items"][0]["tabBeepIdx"], int)

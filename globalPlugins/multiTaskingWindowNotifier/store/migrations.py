@@ -9,24 +9,27 @@ v6_to_v7_beep_reassign 3파일)를 단일 파일로 통합. 각 함수는 `_load
 
     _migrate_from_list       → ③ 구형 app.list 텍스트 → JSON
     _backup_legacy_list      → ③ 마이그레이션 완료 후 .bak 이동
-    _normalize_titles_in_place → ⑤ title 정규화 + dedup
+    _normalize_titles_in_place → ⑤ title 정규화 + dedup (매번 호출, no-op 안전)
     clear_pre_v7_assignments → ⑥ v6 이하 비프 인덱스 clear (재배정은 assign.py)
     ensure_aliases_v8        → ⑥' v7 이하 모든 entry에 aliases=[] 주입 + v8 승격
+    backup_v8_before_v9      → ⑥'' source_version<9일 때 1회 .v8.bak 백업
+    renormalize_aliases_v9   → ⑥'' aliases 필드를 새 normalize_title로 재정규화
 
-v8는 scope=window/app 양쪽 entry에 aliases 배열을 추가하는 단순 필드
-확장이라 비프 재배정/테이블 변경은 없다. `_load_from_json`이 이미 로드
-시점에 aliases 부재 필드를 []로 채우므로 ensure_aliases_v8는 주로 dirty
-플래그 세팅과 저장 트리거 역할을 맡아 파일에 `version=8`이 확실히 기록되게
-한다.
+v9는 normalize_title 파이프라인 확장(em-dash 1순위 + 카운트 토큰 흡수)에
+따른 일관성 보강. title 재정규화는 `_normalize_titles_in_place`가 매 부팅
+호출되므로 자동 흡수되지만, aliases 필드는 등록 시점에만 정규화됐고 저장된
+값에 대한 재처리 경로가 없었다. v9에서 같은 룰로 1회 재정규화한다. 비프
+재배정/테이블 변경은 없다.
 """
 
 import os
+import shutil
 
 from logHandler import log
 
 from ..appIdentity import makeKey, normalize_title
 from ..constants import BEEP_USABLE_SIZE, BEEP_USABLE_START, MAX_ITEMS, SCOPE_WINDOW
-from .io import _bak_path, _new_meta
+from .io import _bak_path, _json_path, _new_meta
 
 
 # ---------------- legacy app.list → JSON ----------------
@@ -238,3 +241,83 @@ def ensure_aliases_v8(state: dict) -> bool:
         "aliases field ensured on all items"
     )
     return True
+
+
+# ---------------- v8 이하 → v9 백업 + aliases 재정규화 ----------------
+
+
+def backup_v8_before_v9(list_path: str, source_version: int) -> bool:
+    """source_version<9일 때 `app.json`을 `app.json.v8.bak`으로 1회 복사.
+
+    백업 파일이 이미 존재하면 덮지 않는다(사용자가 의도적으로 보존한 백업
+    보호). 새 normalize_title 파이프라인(em-dash + 카운트 흡수) 도입으로
+    인한 dedup 합병이 사용자 비프 매핑을 일부 변경할 수 있어 롤백 안전망
+    제공.
+
+    Args:
+        list_path: 사용자가 넘긴 app.list 경로 (내부에서 app.json으로 변환).
+        source_version: 디스크에서 읽어온 원본 버전. 9 이상이면 no-op.
+
+    Returns:
+        bool: 실제 백업이 수행됐으면 True. 이미 백업 존재/원본 부재/version>=9는 False.
+    """
+    if source_version >= 9:
+        return False
+    json_path = _json_path(list_path)
+    if not os.path.exists(json_path):
+        return False
+    bak = json_path + ".v8.bak"
+    if os.path.exists(bak):
+        return False
+    try:
+        shutil.copy2(json_path, bak)
+        log.info(f"mtwn: v{source_version}→v9 backup created path={bak}")
+        return True
+    except Exception:
+        log.warning(f"mtwn: v{source_version}→v9 backup failed path={bak}", exc_info=True)
+        return False
+
+
+def renormalize_aliases_v9(state: dict) -> bool:
+    """source_version<9인 state의 aliases 필드를 새 normalize_title로 재정규화.
+
+    v8 도입 시점엔 aliases가 등록 시점(`scripts.py`)에서만 정규화됐고 디스크에
+    이미 저장된 aliases에 대한 마이그레이션 경로가 없었다. v9에서 새
+    normalize_title(em-dash 1순위 + 카운트 흡수) 파이프라인을 같은 룰로 1회
+    적용해 매칭 일관성 보장.
+
+    title 재정규화는 `_normalize_titles_in_place`가 매 부팅 호출되어 자동 흡수
+    되므로 본 함수는 aliases만 다룬다.
+
+    필터링:
+      - 비문자열 요소는 드롭
+      - 정규화 결과가 빈 문자열이면 드롭(매칭 키로 무의미)
+      - 입력 순서 유지, dedup 없음 (호출부 책임 — 실측상 alias는 보통 1개)
+
+    Returns:
+        bool: 하나라도 변경이 있었으면 True. state["dirty"]도 함께 세팅.
+    """
+    if state.get("source_version", 0) >= 9:
+        return False
+    changed = False
+    for it in state.get("items", []):
+        old_aliases = it.get("aliases", [])
+        if not isinstance(old_aliases, list):
+            continue
+        new_aliases = []
+        for a in old_aliases:
+            if not isinstance(a, str):
+                continue
+            n = normalize_title(a)
+            if n:
+                new_aliases.append(n)
+        if new_aliases != old_aliases:
+            log.info(
+                f"mtwn: migrate v{state.get('source_version', 0)}→v9, "
+                f"aliases {old_aliases!r} → {new_aliases!r} key={it.get('key')!r}"
+            )
+            it["aliases"] = new_aliases
+            changed = True
+    if changed:
+        state["dirty"] = True
+    return changed

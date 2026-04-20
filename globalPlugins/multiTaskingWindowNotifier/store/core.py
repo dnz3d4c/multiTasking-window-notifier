@@ -3,9 +3,9 @@
 
 """앱 목록 + 메타데이터 저장소 — 핫 패스 API 본체.
 
-파일 포맷 (`app.json`, version=8):
+파일 포맷 (`app.json`, version=9):
     {
-      "version": 8,
+      "version": 9,
       "appBeepMap": {"chrome": 0, "notepad": 1, ...},
       "items": [
         {"key": "appId|title", "scope": "window",
@@ -22,15 +22,20 @@
     }
 
 하위 호환:
+    - v8 (carriage-style aliases): 새 normalize_title 파이프라인(em-dash 1순위
+      + 카운트 토큰 흡수) 도입. title은 매 부팅 호출되는 `_normalize_titles_in_place`
+      가 자동 흡수하고, aliases는 `renormalize_aliases_v9`가 1회 재정규화한다.
+      비프 재배정/테이블 변경 없음. 첫 마이그레이션 직전 `app.json.v8.bak`
+      백업 1회.
     - v7 (aliases 필드 부재): 로드 시 모든 entry에 aliases=[] 자동 주입
-      후 v8로 승격 저장. 비프 인덱스 재배정 없음 (단순 필드 확장).
+      후 v8 → v9 연속 승격. 비프 인덱스 재배정 없음 (단순 필드 확장).
     - v6 (반음 64음 테이블): 로드 시 기존 할당을 모두 버리고 v7 온음계 35음
       테이블 기준으로 순차 재할당. 1회성, 사용자는 주파수 재학습 필요.
-      이어서 v8 aliases 주입까지 한 번에 승격.
-    - v5 이하 (거리 최대화 할당): 같은 경로로 한 번에 v8까지 재배정.
+      이어서 v8 aliases 주입 + v9 재정규화까지 한 번에 승격.
+    - v5 이하 (거리 최대화 할당): 같은 경로로 한 번에 v9까지 재배정.
     - v3 이하 (appBeepMap/tabBeepIdx 필드 부재): 동일 재할당 경로로 커버.
-    - v2 (scope 필드 없음): v3→v7→v8 경유 자동 마이그레이션.
-    - `app.json`이 없고 `app.list`가 있으면 최초 `load()`에서 JSON(v8)으로 마이그레이션.
+    - v2 (scope 필드 없음): v3→v7→v8→v9 경유 자동 마이그레이션.
+    - `app.json`이 없고 `app.list`가 있으면 최초 `load()`에서 JSON(v9)으로 마이그레이션.
       모든 줄을 scope="window"로 등록 + 순차 할당 + aliases=[] 후 `app.list.bak`으로 백업.
     - 새 설치(둘 다 없음)는 빈 목록으로 시작.
 
@@ -71,8 +76,10 @@ from .migrations import (
     _backup_legacy_list,
     _migrate_from_list,
     _normalize_titles_in_place,
+    backup_v8_before_v9,
     clear_pre_v7_assignments,
     ensure_aliases_v8,
+    renormalize_aliases_v9,
 )
 
 # 본 모듈은 데이터 레이어다. 실패 시 `log`로만 보고하고 `ui.message`는 호출하지 않는다.
@@ -114,6 +121,7 @@ def _load_state(list_path: str) -> dict:
       ⑤ title normalize 마이그레이션 ("제목 없음 - 메모장" → "제목 없음")
       ⑥ v6 이하 → v7 비프 할당 재배정 + 자동 채움
       ⑥' v7 이하 → v8 aliases 필드 주입 (ensure_aliases_v8)
+      ⑥'' v8 이하 → v9 .v8.bak 백업 + aliases 재정규화 (em-dash + 카운트 흡수)
       ⑦ 캐시 등록
     """
     # ① 캐시
@@ -166,9 +174,11 @@ def _load_state(list_path: str) -> dict:
                 state["dirty"] = False
                 json_trustworthy = True
             # 방금 새 순차 할당 + aliases=[] 주입을 마쳤으므로 ⑥/⑥' 단계를
-            # 건너뛰도록 source_version=8로 표시. (⑤ title normalize는 아래에서
-            # state["items"]에 대해 항상 실행되므로 legacy 경로도 자연 커버.)
-            state["source_version"] = 8
+            # 건너뛰도록 source_version=9로 표시. (⑤ title normalize는 아래에서
+            # state["items"]에 대해 항상 실행되어 새 normalize_title 파이프라인
+            # 으로 처리되므로 legacy 경로도 v9까지 자연 커버. ⑥'' 백업/재정규화
+            # 도 source_version>=9 가드로 no-op.)
+            state["source_version"] = 9
             # 저장 실패 시 dirty 유지 → 다음 flush에서 재시도
 
     # ④ legacy 백업 — JSON이 신뢰 가능한 상태로 확보된 뒤 1회.
@@ -205,10 +215,18 @@ def _load_state(list_path: str) -> dict:
     # 기록하게 한다. 비프 재배정/테이블 변경은 없다.
     ensure_aliases_v8(state)
 
+    # ⑥'' v8 이하 → v9 백업 + aliases 재정규화.
+    # 새 normalize_title 파이프라인(em-dash 1순위 + 카운트 토큰 흡수) 도입에
+    # 따른 일관성 보강. title은 ⑤ 단계가 자동 흡수, aliases는 등록 시점에만
+    # 정규화됐던 잔여 값을 같은 룰로 1회 재처리. 백업은 dedup 합병으로 인한
+    # 사용자 비프 매핑 변경의 롤백 안전망.
+    backup_v8_before_v9(list_path, state.get("source_version", 0))
+    renormalize_aliases_v9(state)
+
     if state["dirty"]:
         if _save_to_disk(list_path, state):
             state["dirty"] = False
-            state["source_version"] = 8
+            state["source_version"] = 9
 
     # ⑦ 캐시 등록
     _states[list_path] = state
