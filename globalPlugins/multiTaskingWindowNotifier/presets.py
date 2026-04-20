@@ -22,7 +22,6 @@
     previewSlots        — "미리듣기(&P)" 버튼이 재생할 대표 슬롯 인덱스 2개
     descriptionLabel    — ListBox focus 시 표시되는 짧은 설명 (raw str)
     freqs               — slotCount 길이의 정수 주파수(Hz) 리스트
-    durationMs / gapMs  — 2음 순차 재생의 각 음 길이/간격
     suppressRepeat      — 최근 0.3초 내 같은 키 재매칭 시 tab음 생략
     octaveVariation     — 같은 앱 재진입 시 tab idx ±7 clip
     waveform            — (hybrid 전용) nvwave+synthEngine.render_wav 경로 진입 트리거
@@ -125,8 +124,6 @@ PRESETS = {
         "previewSlots": (0, 14),  # C3, C5
         "descriptionLabel": "C 장조 35음 (도·레·미·파·솔·라·시 × 5옥타브). 현행 기본.",
         "freqs": BEEP_TABLE,  # read-only 공유 참조
-        "durationMs": 50,
-        "gapMs": 100,
         "suppressRepeat": False,
         "octaveVariation": False,
     },
@@ -138,8 +135,6 @@ PRESETS = {
         "previewSlots": (5, 20),  # C3, C6
         "descriptionLabel": "5음계(C D E G A) × 7옥타브. 같은 창 빠른 재진입 시 탭음을 생략하고 옥타브 변주로 반복감을 완화.",
         "freqs": _PENTATONIC_FREQS,
-        "durationMs": 50,
-        "gapMs": 100,
         # "Calm" 캐릭터를 살리는 두 기능을 기본 on.
         #   suppressRepeat — 같은 매칭 키가 _SUPPRESS_REPEAT_SEC(0.3s) 내로 다시 오면
         #       탭음 생략(앱음만). Alt+Tab 연타/NVDA 이벤트 근접 재발화 시 피로 감소.
@@ -156,8 +151,6 @@ PRESETS = {
         "previewSlots": (0, 7),  # C3, C4
         "descriptionLabel": "완전5도 진행(C-G-D-A-E-B-F) × 5옥타브. 팡파레 느낌.",
         "freqs": _build_fifths_freqs(),
-        "durationMs": 50,
-        "gapMs": 100,
         "suppressRepeat": False,
         "octaveVariation": False,
     },
@@ -176,8 +169,6 @@ PRESETS = {
         "descriptionLabel": "삼각파. 부드럽고 따뜻한 8비트 배경음 느낌.",
         "freqs": BEEP_TABLE,
         "waveform": "triangle",
-        "durationMs": 50,
-        "gapMs": 100,
         "suppressRepeat": False,
         "octaveVariation": False,
     },
@@ -193,8 +184,6 @@ PRESETS = {
         "previewSlots": (0, 14),  # A2, A4
         "descriptionLabel": "A 자연단음계 7음 × 5옥타브. 차분한 애조.",
         "freqs": _A_MINOR_FREQS,
-        "durationMs": 50,
-        "gapMs": 100,
         "suppressRepeat": False,
         "octaveVariation": False,
     },
