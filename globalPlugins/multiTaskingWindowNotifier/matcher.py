@@ -23,11 +23,11 @@ import time
 from logHandler import log
 
 from . import beepPlayer
+from . import presets
 from . import store
 from . import settings
 from .appIdentity import makeKey, splitKey
 from .constants import SCOPE_APP, SCOPE_WINDOW
-from .presets import CLASSIC_PRESET_ID, PRESETS
 
 # beepPlayer 모듈 자체를 import하고 호출 시점에 속성 lookup한다.
 # `from .beepPlayer import play_beep`로 바인딩하면 테스트에서 beepPlayer 모듈에
@@ -217,10 +217,10 @@ class Matcher:
         plugin._flush_scheduler.maybe_flush()
 
     def _active_preset(self):
-        """현재 활성 프리셋 dict. 미지 id면 classic 폴백 (beepPlayer와 동일 정책).
+        """현재 활성 프리셋 dict. 미지 id면 classic 폴백.
 
-        매 매칭마다 호출되는 핫 패스. dict 조회 2회(settings.get + PRESETS.get)로
-        수 μs 수준이라 캐시 없이도 충분.
+        폴백/경고 가드는 `presets.get_preset_or_classic`가 단일 소유.
+        매 매칭마다 호출되는 핫 패스지만 dict.get + set 조회 수 μs 수준.
         """
         preset_id = settings.get("beepPreset")
-        return PRESETS.get(preset_id) or PRESETS[CLASSIC_PRESET_ID]
+        return presets.get_preset_or_classic(preset_id)

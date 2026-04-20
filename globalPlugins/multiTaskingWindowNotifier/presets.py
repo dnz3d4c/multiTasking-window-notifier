@@ -303,7 +303,8 @@ def migrate_deprecated_preset(section) -> None:
                 pass
     except Exception:
         # 설정 섹션이 손상됐거나 타입이 예상과 다른 경우에도 플러그인 부팅을
-        # 막지 않는다. 최악의 경우 `_get_active_preset`의 런타임 폴백이 작동.
+        # 막지 않는다. 최악의 경우 beepPlayer/matcher의 `get_preset_or_classic`
+        # 런타임 폴백이 classic으로 흡수.
         log.exception(f"mtwn: migrate_deprecated_preset failed (section={section!r})")
 
 

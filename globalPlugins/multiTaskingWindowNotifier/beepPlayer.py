@@ -8,8 +8,13 @@ v4 2차원 비프:
     - scope=window 매칭은 app_idx(a) 재생 후 gap_ms 뒤에 tab_idx(b) 재생.
       a는 같은 appId의 모든 window가 공유 → "이 앱이다" 식별.
       b는 같은 appId 내에서 고유 → "이 탭이다" 식별.
-    - a와 b가 순차로 재생되므로 절대 비교 대신 상대 비교가 되어 반음 간격도
-      충분히 변별된다. 이론 조합 64 × 64 = 4096.
+    - a와 b가 순차로 재생되므로 절대 비교 대신 상대 비교가 되어 작은 간격도
+      충분히 변별된다.
+
+경로 분기:
+    - `preset["waveform"]` 미지정 → `tones.beep` (classic/pentatonic/fifths)
+    - `preset["waveform"]` 지정 → synthEngine.render_wav + nvwave
+      (arcade_pop/coin_dash/soft_retro 등 hybrid. Phase 7.5부터 glass_step도 포함)
 
 타이밍 원칙:
     - gap_ms는 NVDA `core.callLater`로 비동기 예약. 내부에서 wx.CallLater를
@@ -18,15 +23,19 @@ v4 2차원 비프:
     - settings.CONFSPEC 기본값은 duration=50ms, gap=100ms. 2음 총 150ms
       (duration 50 + gap 100)로 v3 단음 100ms보다 길지만 두 음 변별을 위한
       여유가 필수.
+
+프리셋 폴백:
+    미지 preset_id 조회 시 classic 폴백 + 경고는 `presets.get_preset_or_classic`
+    이 단일 소유. 본 모듈은 호출만 한다 (스팸 가드 이중화 금지).
 """
 
 import tones
 
 from logHandler import log
 
+from . import presets
 from . import settings
 from .constants import SCOPE_APP, SCOPE_WINDOW
-from .presets import CLASSIC_PRESET_ID, PRESETS
 
 # synthEngine / nvwave는 지연 import로 감쌈. NVDA 외 환경(단위 테스트)에서는
 # nvwave가 없어도 tones.beep 경로만 타면 import 없이 동작. 지연 import 실패는
@@ -35,30 +44,6 @@ from .presets import CLASSIC_PRESET_ID, PRESETS
 # duration/gap_ms 기본값 상수는 두지 않는다. settings.CONFSPEC(settings.py)이
 # 사용자 조정 가능한 단일 SoT이며, matcher가 항상 settings.get()으로 주입한다.
 # 기본값 조정이 필요하면 settings.CONFSPEC의 default=... 한 곳만 고친다.
-
-# 미지 프리셋 id에 대한 경고 스팸 방지용. 같은 잘못된 id로 매 focus마다 경고가
-# 쏟아지면 로그가 무용지물이 되므로 id별로 1회만 기록한다.
-_warned_preset_ids: set = set()
-
-
-def _get_active_preset() -> dict:
-    """현재 선택된 프리셋 dict 반환. 미지 id는 classic 폴백 + 1회 경고.
-
-    Phase 1에서는 모든 프리셋이 slotCount=35로 통일돼 있어 stored_idx를 그대로
-    쓰지만, Phase 3 이후 slotCount 가변 프리셋이 도입되면 재생 시점 modulo wrap이
-    필요. 본 함수는 그 전환의 진입점이다.
-    """
-    preset_id = settings.get("beepPreset")
-    preset = PRESETS.get(preset_id)
-    if preset is None:
-        if preset_id not in _warned_preset_ids:
-            _warned_preset_ids.add(preset_id)
-            log.warning(
-                f"mtwn: unknown beepPreset={preset_id!r}, falling back to "
-                f"{CLASSIC_PRESET_ID!r}"
-            )
-        preset = PRESETS[CLASSIC_PRESET_ID]
-    return preset
 
 
 def _resolve_volume(volume):
@@ -74,11 +59,11 @@ def _resolve_volume(volume):
 def _play_via_synth(freq: int, duration: int, waveform: str, volume=None) -> None:
     """synthEngine으로 wav 파일 생성 후 nvwave로 비동기 재생. 실패 시 tones.beep 폴백.
 
-    호출 경로: Phase 3 이후 프리셋 메타에 `waveform` 키가 있을 때만 진입.
-    기존 classic/pentatonic/fifths(waveform 메타 없음)는 tones.beep 경로.
+    호출 경로: hybrid 프리셋 메타에 `waveform` 키가 있을 때만 진입.
+    classic/pentatonic/fifths(waveform 메타 없음)는 tones.beep 경로.
 
-    Phase 6: `volume` (50~150%) 인자 도입. None이면 `settings.beepVolume` 조회.
-    미리듣기는 슬라이더 현재값을 override로 전달해 저장 전 즉시 체감.
+    `volume` (50~150%) 인자. None이면 `settings.beepVolume` 조회. 미리듣기는
+    슬라이더 현재값을 override로 전달해 저장 전 즉시 체감.
 
     폴백 정책 (절대 침묵 금지):
         - synthEngine import 실패(모듈 누락 등): tones.beep(freq) 단순 재생
@@ -116,49 +101,6 @@ def _play_one_beep(freq: int, duration: int, waveform, volume=None) -> None:
         _play_via_synth(freq, duration, waveform, volume=volume)
 
 
-def _play_spec(spec: dict, volume=None) -> None:
-    """Phase 4 synthSpec 재생. synthEngine.render_spec + nvwave + tones 폴백.
-
-    spec의 durationMs/freq를 사용 — 사용자 settings 값은 무시(프리셋이 슬롯별로
-    자체 duration을 정의). 폴백 시엔 spec.freq + spec.durationMs로 tones.beep.
-    Phase 6: volume(50~150%) 인자 도입.
-    """
-    try:
-        from . import synthEngine
-        import nvwave
-    except Exception:
-        log.exception("mtwn: synth import failed, falling back to tones.beep")
-        # spec.freq는 noise 슬롯에서 0이고, tones.beep은 0Hz에서 에러/무음 가능.
-        # 방어로 0/None 시 기본 음 440Hz. waveform=noise 슬롯의 폴백은 "노이즈를
-        # 흉내 못 하지만 최소한 소리는 난다" 수준이 목표.
-        fallback_freq = int(spec.get("freq", 440)) or 440
-        tones.beep(fallback_freq, int(spec.get("durationMs", 50)))
-        return
-    try:
-        vol = _resolve_volume(volume)
-        wav_path = synthEngine.render_spec(spec, volume=vol)
-        nvwave.playWaveFile(wav_path, asynchronous=True)
-    except Exception:
-        log.exception(
-            f"mtwn: nvwave play failed (spec kind={spec.get('kind')!r}), "
-            f"falling back to tones.beep"
-        )
-        # spec.freq는 noise 슬롯에서 0이고, tones.beep은 0Hz에서 에러/무음 가능.
-        # 방어로 0/None 시 기본 음 440Hz. waveform=noise 슬롯의 폴백은 "노이즈를
-        # 흉내 못 하지만 최소한 소리는 난다" 수준이 목표.
-        fallback_freq = int(spec.get("freq", 440)) or 440
-        tones.beep(fallback_freq, int(spec.get("durationMs", 50)))
-
-
-def _schedule_second_spec(spec: dict, gap_ms: int, volume=None) -> None:
-    """gap_ms 뒤에 _play_spec 예약. _schedule_second_beep의 spec 버전."""
-    try:
-        import core
-        core.callLater(gap_ms, _play_spec, spec, volume)
-    except Exception:
-        log.exception("mtwn: second spec scheduling failed")
-
-
 def _schedule_second_beep(
     freq: int, duration: int, gap_ms: int, waveform=None, volume=None
 ) -> None:
@@ -172,7 +114,7 @@ def _schedule_second_beep(
     상위 이벤트 훅(`__init__.py`의 event_* 3종)이 이미 try/except로 예외를
     흡수하지만, 컨텍스트 마커 보존을 위해 여기서도 log.exception 한 겹만 유지.
 
-    waveform=None(기본)이면 기존 tones.beep 경로, 아니면 synthEngine 경로로 분기.
+    waveform=None(기본)이면 tones.beep 경로, 아니면 synthEngine 경로로 분기.
     """
     try:
         import core
@@ -202,16 +144,17 @@ def play_beep(
         - 프리셋의 `freqs`/`slotCount` 기준 범위 체크.
         - app_idx가 범위 밖이면 경고 로그 후 무음 (예외 없음).
         - tab_idx가 범위 밖이면 경고 로그 + 단음 fallback.
-        - SCOPE_APP: `tones.beep(a, duration)` 1회.
+        - SCOPE_APP: app 비프 a 1회.
         - SCOPE_WINDOW + tab_idx: a 즉시 재생 → `core.callLater(gap_ms, beep, b)`.
     """
-    preset = _get_active_preset()
+    preset_id = settings.get("beepPreset")
+    preset = presets.get_preset_or_classic(preset_id)
     size = preset["slotCount"]
 
-    # Phase 4: stored idx가 MAX_ITEMS(=128) 공간에 있고 프리셋 slotCount는 가변
-    # (Drum Kit=8 등). 재생 시점 modulo wrap으로 현재 프리셋 범위에 맞춤.
-    # stored idx 자체는 보존되므로 프리셋 왕복 시 원복 가능. 음수 방어는 Python
-    # 의 % 연산자가 양수 결과 보장(-1 % 35 == 34).
+    # stored idx는 MAX_ITEMS(=128) 공간에서 배정되고 프리셋 slotCount는 프리셋마다
+    # 정의(현재 모두 35). 재생 시점 modulo wrap으로 현재 프리셋 범위에 맞춤.
+    # stored idx 자체는 보존돼 프리셋 왕복 시 원복 가능. 음수 방어는 Python의 %
+    # 연산자가 양수 결과 보장(-1 % 35 == 34).
     if not isinstance(app_idx, int) or size <= 0:
         log.warning(
             f"mtwn: play_beep invalid app_idx={app_idx!r} or slotCount={size} "
@@ -220,22 +163,6 @@ def play_beep(
         return
     effective_app_idx = app_idx % size
 
-    synth_specs = preset.get("synthSpecs")
-    if synth_specs is not None:
-        # Phase 4 synthSpecs 경로 (drum_kit/lazer_pack/eight_bit_jump).
-        # 각 슬롯이 자체 durationMs/envelope를 가지므로 호출자 duration/gap_ms 중
-        # gap_ms만 사용. duration은 spec에 내장.
-        _play_spec(synth_specs[effective_app_idx])
-        if scope == SCOPE_APP or tab_idx is None:
-            return
-        if not isinstance(tab_idx, int):
-            log.warning(f"mtwn: play_beep invalid tab_idx={tab_idx!r}")
-            return
-        effective_tab_idx = tab_idx % size
-        _schedule_second_spec(synth_specs[effective_tab_idx], gap_ms)
-        return
-
-    # freqs 경로 (classic/pentatonic/fifths/arcade_pop/coin_dash/soft_retro).
     freqs = preset["freqs"]
     waveform = preset.get("waveform")  # None이면 tones.beep 경로(classic 계열)
 
@@ -264,23 +191,14 @@ def play_preview(preset_id: str, duration: int, gap_ms: int, volume=None) -> Non
         preset_id: PRESETS의 key. 미지 id면 classic 폴백 + 1회 경고.
         duration: 각 음 지속 시간(ms). 보통 settings["beepDuration"].
         gap_ms: 두 음 간격(ms). 보통 settings["beepGapMs"].
-        volume: Phase 6 beepVolume(50~150%). None이면 settings 조회. 설정 패널
-            슬라이더 현재값을 override로 전달해 저장 전 즉시 체감 가능.
+        volume: beepVolume(50~150%). None이면 settings 조회. 설정 패널 슬라이더
+            현재값을 override로 전달해 저장 전 즉시 체감 가능.
 
     미리듣기는 실제 재생과 같은 경로를 써서 사용자가 실 사용 시의 소리를 그대로
-    듣게 한다. 미리듣기 vs 실제 매칭 경합 정책은 Phase 3에서 `_pending_callback.
-    Stop()` 기반으로 강화 예정. Phase 1에선 NVDA `core.callLater`의 기본 동작
-    (이전 콜백 대체 없음)에 의존.
+    듣게 한다. 미리듣기 vs 실제 매칭 경합 정책은 NVDA `core.callLater`의 기본
+    동작(이전 콜백 대체 없음)에 의존.
     """
-    preset = PRESETS.get(preset_id)
-    if preset is None:
-        if preset_id not in _warned_preset_ids:
-            _warned_preset_ids.add(preset_id)
-            log.warning(
-                f"mtwn: play_preview unknown preset={preset_id!r}, "
-                f"falling back to {CLASSIC_PRESET_ID!r}"
-            )
-        preset = PRESETS[CLASSIC_PRESET_ID]
+    preset = presets.get_preset_or_classic(preset_id)
 
     size = preset["slotCount"]
     slot_a, slot_b = preset["previewSlots"]
@@ -288,13 +206,6 @@ def play_preview(preset_id: str, duration: int, gap_ms: int, volume=None) -> Non
     # 그래도 방어적으로 clamp (하위 프리셋이 수동 편집됐을 가능성).
     slot_a = max(0, min(size - 1, slot_a))
     slot_b = max(0, min(size - 1, slot_b))
-
-    synth_specs = preset.get("synthSpecs")
-    if synth_specs is not None:
-        # synthSpecs 프리셋 미리듣기 — 슬롯 spec 그대로 재생. gap/volume 인자 사용.
-        _play_spec(synth_specs[slot_a], volume=volume)
-        _schedule_second_spec(synth_specs[slot_b], gap_ms, volume=volume)
-        return
 
     freqs = preset["freqs"]
     waveform = preset.get("waveform")
