@@ -58,6 +58,8 @@ def handle(plugin, obj) -> None:
     if not appId:
         return
     raw_title = (getattr(obj, "name", "") or "").strip()
+    # raw → normalize (3 훅 공통 관례). 여기서는 empty 컷 안 함 — title 빈
+    # 상태에서도 appId만으로 SCOPE_APP fallback 매칭이 일어나야 하므로.
     title = normalize_title(raw_title)
     # tab_sig: foreground 창의 hwnd. 같은 (appId, title) 조합이라도 다른
     # hwnd면 다른 시그니처로 처리되어 dedup 가드와 자연스럽게 맞물린다.

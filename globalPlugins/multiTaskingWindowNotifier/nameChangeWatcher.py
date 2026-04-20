@@ -67,6 +67,7 @@ def handle(plugin, obj) -> None:
             log.info("mtwn: DBG nameChange skip-empty-name")
         return
     appId = getAppId(obj)
+    # raw → normalize → empty-check (3 훅 공통 관례). 정규화 후 빈 문자열이면 탈출.
     title = normalize_title(fg_name)
     if not title:
         if debug:

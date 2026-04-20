@@ -63,6 +63,8 @@ def dispatch(plugin, obj) -> None:
     if match_source is None:
         return
     raw_title, tab_sig, match_appId = match_source
+    # raw → normalize → empty-check (3 훅 공통 관례). 꼬리 앱명 서픽스·(N)
+    # 카운트 토큰·dangling 구분자 제거 후 빈 문자열이면 매칭 불가로 탈출.
     title = normalize_title(raw_title)
     if not title:
         return

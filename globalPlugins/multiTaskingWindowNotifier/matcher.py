@@ -44,6 +44,24 @@ class Matcher:
 
     dedup 상태(`last_event_sig`)는 인스턴스 속성으로 보유한다. 테스트/복귀
     시나리오에서는 `matcher.last_event_sig = None` 직접 대입으로 초기화.
+
+    두 dedup 정책의 교차 시나리오 (의도된 동작):
+
+        * **A → B → A (짧은 왕복)** — B 매칭 순간 last_event_sig=B, `_last_matched_key`=B.
+          A 복귀 시 sig가 달라 통과 + is_repeat=False(키 다름) → 일반 재생.
+
+        * **A → 미스 창 → A 복귀** — 미스 매칭에서 last_event_sig=None으로 리셋
+          (matcher.py 내 matched_key is None 분기 참조). A 복귀 시 sig_guard 통과.
+          그러나 `_last_matched_key`는 A 유지(의도적 미리셋) → is_repeat=True로
+          판정되어 pentatonic 프리셋의 suppressRepeat/octaveVariation이 적용됨.
+          사용자 관점의 "같은 창 빠른 복귀"로 취급하는 의도된 UX.
+
+        * **같은 탭 자식 컨트롤 재진입** — (appId, title, tab_sig) 동일 →
+          last_event_sig 동등으로 sig_guard skip. 재생 없음.
+
+    sig_guard는 "같은 이벤트 중복 흡수"가 목적이고, _last_matched_key는 "사용자
+    행동 기반 반복 판정"이 목적이라 리셋 정책이 일부러 다르다. 단순화하면
+    pentatonic 프리셋 UX가 후퇴함(리뷰 2026-04-20 C2 결정).
     """
 
     def __init__(self, plugin):

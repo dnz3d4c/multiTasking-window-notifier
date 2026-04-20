@@ -53,6 +53,11 @@ def makeAppKey(appId: str) -> str:
 
     splitKey와의 충돌 우려는 scope 필드(meta)로 구분하므로 여기선 발생하지 않음.
     splitKey는 scope=window 항목에 대해서만 호출한다.
+
+    `return appId`의 한 줄 래퍼이지만 **대칭성 유지**를 위해 남긴다. makeKey/
+    splitKey와 묶어 "scope=app 키를 만드는 공식 경로"임을 타입 수준에서 표현.
+    호출처는 현재 `scripts.py:199` 한 곳뿐이나, 향후 scope=app 키 포맷이
+    바뀌면(예: `"app:" + appId` 접두사 도입) 여기가 **단일 수정 지점**.
     """
     return appId
 

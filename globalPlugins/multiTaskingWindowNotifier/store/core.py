@@ -96,6 +96,12 @@ from .migrations import (
 #   }
 #   corrupted: 최근 _load_state가 손상된 app.json을 만나 빈 상태로 초기화한 경우 True.
 #              사용자 안내용 플래그. save() 성공 시 False로 리셋.
+#
+# 동시성 가정: NVDA main thread(= wx GUI 스레드) 단일 소유. 이벤트 훅·@script
+# 핸들러·설정 패널 모두 같은 스레드에서 순차 호출되므로 `_states[k]=v`와
+# `_states.get(k)` 모두 GIL 보호되는 단일 연산으로 충분. threading.Thread를
+# 도입하는 시점이 오면 `threading.Lock`으로 접근부 감싸거나 copy-on-read
+# 전략을 검토할 것. 현재는 Lock 선제 도입 = YAGNI.
 _states = {}
 
 
