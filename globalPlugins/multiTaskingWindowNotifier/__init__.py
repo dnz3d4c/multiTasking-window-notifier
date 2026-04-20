@@ -96,8 +96,8 @@ class GlobalPlugin(ScriptsMixin, globalPluginHandler.GlobalPlugin):
         if store.is_corrupted(self.appListFile):
             log.info(f"mtwn: corruption alert queued path={self.appListFile!r}")
             ui.delayedMessage(
-                "앱 목록 파일이 손상되어 빈 상태로 시작했어요. "
-                "이전 목록은 자동 복구되지 않으니 필요하면 백업을 확인해 주세요.",
+                _("앱 목록 파일이 손상되어 빈 상태로 시작했어요. "
+                  "이전 목록은 자동 복구되지 않으니 필요하면 백업을 확인해 주세요."),
             )
 
     def terminate(self):

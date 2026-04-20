@@ -124,7 +124,7 @@ class ScriptsMixin(metaclass=ScriptableType):
         # 등록 소스는 foreground (메모장처럼 자식 컨트롤이 focus를 받아도 활성 탭 제목 취득).
         fg, appId, title, key = get_current_window_info()
         if not title:
-            ui.message("창 제목을 확인할 수 없어요.", speechPriority=speech.Spri.NEXT)
+            ui.message(_("창 제목을 확인할 수 없어요."), speechPriority=speech.Spri.NEXT)
             return
 
         # 사전 중복 검사: 창과 앱 둘 다 이미 등록돼 있으면 다이얼로그 건너뛰고 즉시 안내.
@@ -133,7 +133,7 @@ class ScriptsMixin(metaclass=ScriptableType):
         window_registered = key in self.windowLookup
         app_registered = appId in self.appLookup
         if window_registered and app_registered:
-            ui.message("이미 창과 앱 둘 다 목록에 있어요.", speechPriority=speech.Spri.NEXT)
+            ui.message(_("이미 창과 앱 둘 다 목록에 있어요."), speechPriority=speech.Spri.NEXT)
             return
 
         # scope 선택 다이얼로그를 GUI 스레드에서 띄우고 결과를 콜백으로 처리.
@@ -189,12 +189,12 @@ class ScriptsMixin(metaclass=ScriptableType):
         # 중복 체크: scope별로 나뉘므로 같은 appId여도 창 등록과 앱 등록은 공존 허용.
         if scope == SCOPE_WINDOW:
             if key in self.windowLookup:
-                ui.message("이미 목록에 있어요.", speechPriority=speech.Spri.NEXT)
+                ui.message(_("이미 목록에 있어요."), speechPriority=speech.Spri.NEXT)
                 return
             new_key = key
         else:  # SCOPE_APP
             if appId in self.appLookup:
-                ui.message("이미 목록에 있어요.", speechPriority=speech.Spri.NEXT)
+                ui.message(_("이미 목록에 있어요."), speechPriority=speech.Spri.NEXT)
                 return
             new_key = makeAppKey(appId)
 
@@ -203,7 +203,7 @@ class ScriptsMixin(metaclass=ScriptableType):
         # 사용자가 직접 줄일 실용 이유가 없다.
         if len(self.appList) >= MAX_ITEMS:
             ui.message(
-                "목록이 가득 찼어요. 몇 개 지우고 다시 시도해 주세요.",
+                _("목록이 가득 찼어요. 몇 개 지우고 다시 시도해 주세요."),
                 speechPriority=speech.Spri.NEXT,
             )
             return
@@ -212,7 +212,7 @@ class ScriptsMixin(metaclass=ScriptableType):
         if not store.save(self.appListFile, self.appList, scopes={new_key: scope}):
             self.appList.pop()
             ui.message(
-                "앱 목록을 저장하는 중 문제가 생겼어요. 다시 시도해 주세요.",
+                _("앱 목록을 저장하는 중 문제가 생겼어요. 다시 시도해 주세요."),
                 speechPriority=speech.Spri.NOW,
             )
             return
@@ -226,8 +226,8 @@ class ScriptsMixin(metaclass=ScriptableType):
                 # alias 저장 실패 — 본 등록은 성공했으므로 롤백하지 않음.
                 # 사용자에게 경고만. listDialog 편집으로 재시도 가능.
                 ui.message(
-                    "추가는 됐는데 대체 제목을 저장하지 못했어요. "
-                    "목록 다이얼로그에서 다시 시도해 주세요.",
+                    _("추가는 됐는데 대체 제목을 저장하지 못했어요. "
+                      "목록 다이얼로그에서 다시 시도해 주세요."),
                     speechPriority=speech.Spri.NOW,
                 )
                 log.warning(
@@ -240,17 +240,17 @@ class ScriptsMixin(metaclass=ScriptableType):
         # 분리해 NVDA 발화 호흡을 확보.
         if scope == SCOPE_APP:
             ui.message(
-                "앱 전체로 추가했어요: %s" % appId,
+                _("앱 전체로 추가했어요: {appId}").format(appId=appId),
                 speechPriority=speech.Spri.NEXT,
             )
         else:
             ui.message(
-                "창으로 추가했어요: %s | %s" % (appId, title),
+                _("창으로 추가했어요: {appId} | {title}").format(appId=appId, title=title),
                 speechPriority=speech.Spri.NEXT,
             )
         if normalized_alias:
             ui.message(
-                "대체 제목도 저장했어요: %s" % normalized_alias,
+                _("대체 제목도 저장했어요: {alias}").format(alias=normalized_alias),
                 speechPriority=speech.Spri.NEXT,
             )
         log.info(
@@ -266,7 +266,7 @@ class ScriptsMixin(metaclass=ScriptableType):
         # 삭제 소스도 foreground (메모장 자식 컨트롤 케이스 대응).
         fg, appId, title, key = get_current_window_info()
         if not title:
-            ui.message("창 제목을 확인할 수 없어요.", speechPriority=speech.Spri.NEXT)
+            ui.message(_("창 제목을 확인할 수 없어요."), speechPriority=speech.Spri.NEXT)
             return
 
         # 우선순위 창 > 앱. 무엇을 지웠는지 음성으로 명확히 알려줌.
@@ -283,21 +283,21 @@ class ScriptsMixin(metaclass=ScriptableType):
             self.appList.remove(appId)
             removed_scope = SCOPE_APP
         else:
-            ui.message("목록에 없는 항목이에요.", speechPriority=speech.Spri.NEXT)
+            ui.message(_("목록에 없는 항목이에요."), speechPriority=speech.Spri.NEXT)
             return
 
         if not store.save(self.appListFile, self.appList):
             self.appList = original
             ui.message(
-                "앱 목록을 저장하는 중 문제가 생겼어요. 다시 시도해 주세요.",
+                _("앱 목록을 저장하는 중 문제가 생겼어요. 다시 시도해 주세요."),
                 speechPriority=speech.Spri.NOW,
             )
             return
         self._rebuild_lookup()
         if removed_scope == SCOPE_APP:
-            ui.message("앱 전체에서 삭제했어요.", speechPriority=speech.Spri.NEXT)
+            ui.message(_("앱 전체에서 삭제했어요."), speechPriority=speech.Spri.NEXT)
         else:
-            ui.message("창에서 삭제했어요.", speechPriority=speech.Spri.NEXT)
+            ui.message(_("창에서 삭제했어요."), speechPriority=speech.Spri.NEXT)
         log.info(f"mtwn: remove succeeded scope={removed_scope!r} total={len(self.appList)}")
 
     @script(
@@ -311,7 +311,7 @@ class ScriptsMixin(metaclass=ScriptableType):
         self._rebuild_lookup()
         self._flush_scheduler.reset()
         ui.message(
-            f"목록을 다시 불러왔어요. 지금 {len(items)}개예요.",
+            _("목록을 다시 불러왔어요. 지금 {count}개예요.").format(count=len(items)),
             speechPriority=speech.Spri.NEXT,
         )
         log.info(f"mtwn: reload loaded={len(items)}")
@@ -323,7 +323,7 @@ class ScriptsMixin(metaclass=ScriptableType):
     def script_showAllEntries(self, gesture=None):
         # 파일 I/O 없이 메모리 목록 사용
         if not self.appList:
-            ui.message("등록된 창이 없어요.", speechPriority=speech.Spri.NEXT)
+            ui.message(_("등록된 창이 없어요."), speechPriority=speech.Spri.NEXT)
             return
 
         def show_dialog():
@@ -341,7 +341,7 @@ class ScriptsMixin(metaclass=ScriptableType):
 
         wx.CallAfter(show_dialog)
         ui.message(
-            f"총 {len(self.appList)}개를 표시했어요.",
+            _("총 {count}개를 표시했어요.").format(count=len(self.appList)),
             speechPriority=speech.Spri.NEXT,
         )
 
@@ -359,7 +359,7 @@ class ScriptsMixin(metaclass=ScriptableType):
         self.appList = new_list
         self._rebuild_lookup()
         ui.message(
-            f"{len(entries)}개 항목을 목록에서 삭제했어요.",
+            _("{count}개 항목을 목록에서 삭제했어요.").format(count=len(entries)),
             speechPriority=speech.Spri.NEXT,
         )
         log.info(f"mtwn: dialog bulk delete count={len(entries)} total={len(self.appList)}")
@@ -387,7 +387,7 @@ class ScriptsMixin(metaclass=ScriptableType):
         # 기존 값과 정규화 결과가 같으면 no-op (불필요한 디스크 쓰기 방지)
         if normalized == current:
             ui.message(
-                "대체 제목에 변화가 없어 그대로 두었어요.",
+                _("대체 제목에 변화가 없어 그대로 두었어요."),
                 speechPriority=speech.Spri.NEXT,
             )
             return True
@@ -400,12 +400,12 @@ class ScriptsMixin(metaclass=ScriptableType):
             # 사용자 입력을 조사(`'...'(으)로`) 템플릿에 박지 않고 ": " 경계로
             # 분리해 발화 품질 확보. 기존 "추가/삭제했어요" 메시지 톤과 일치.
             ui.message(
-                "대체 제목을 바꿨어요: %s" % normalized,
+                _("대체 제목을 바꿨어요: {alias}").format(alias=normalized),
                 speechPriority=speech.Spri.NEXT,
             )
         else:
             ui.message(
-                "대체 제목을 지웠어요.",
+                _("대체 제목을 지웠어요."),
                 speechPriority=speech.Spri.NEXT,
             )
         log.info(
