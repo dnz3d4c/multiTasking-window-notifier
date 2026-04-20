@@ -25,8 +25,8 @@ from .constants import ADDON_NAME
 # - debugLogging      : event_gainFocus 진단 로그. Ctrl+Tab/오버레이 classname 추적용.
 #                      기본 False. 켜면 NVDA 로그(%APPDATA%\\nvda\\nvda.log)에 한 줄씩 기록.
 # - beepPreset        : 비프 프리셋 id. presets.PRESETS의 key.
-#                      미지/폐기 id 지정 시 presets.migrate_deprecated_preset 또는
-#                      런타임 fallback(get_preset_or_classic)이 classic으로 흡수.
+#                      미지/폐기 id 지정 시 런타임 fallback(get_preset_or_classic)
+#                      이 classic으로 흡수한다 (재생 정상 동작).
 CONFSPEC = {
     "beepDuration": "integer(default=50, min=20, max=500)",
     "beepGapMs": "integer(default=100, min=0, max=200)",
@@ -48,7 +48,6 @@ CONFSPEC = {
 # - humorPackWarningShown: humor_pack 옵트인 프리셋 1회성 경고 플래그. Phase 7.4
 #                          에서 humor_pack 자체가 철회되며 의미 소멸. 사용자
 #                          config에 잔존할 수 있어 여기서 정리.
-#                          (presets.migrate_deprecated_preset도 중복 정리.)
 # register()에서 1회성으로 nvda.ini 잔재를 정리한다(다음 NVDA 종료 시 디스크 반영).
 _OBSOLETE_KEYS = (
     "beepVolumeLeft", "beepVolumeRight", "maxItems", "humorPackWarningShown",

@@ -4,15 +4,14 @@
 """프리셋 데이터 단일 소유자 모듈 (Phase 7.1 신설).
 
 여러 모듈(constants/synthEngine/beepPlayer/settings/settingsPanel)에 산재했던
-프리셋 관련 로직 — dict 정의, freqs 빌더, 부팅 불변식 assert, 폴백 경고,
-폐기 프리셋 감지·마이그레이션 — 을 한 모듈로 응집한다.
+프리셋 관련 로직 — dict 정의, freqs 빌더, 부팅 불변식 assert, 폴백 경고 —
+을 한 모듈로 응집한다.
 
 원칙:
     - 프리셋 데이터 소유자는 이 모듈뿐. 다른 모듈은 공개 API만 호출.
     - 의존 방향: presets.py → constants.py 만 허용. settings/beepPlayer/
       synthEngine을 import하지 않는다(역전 금지).
-    - 공개 API: PRESETS, CLASSIC_PRESET_ID, get_preset_or_classic,
-      migrate_deprecated_preset.
+    - 공개 API: PRESETS, CLASSIC_PRESET_ID, get_preset_or_classic.
 
 프리셋 dict 포맷:
     id                  — 내부 식별자(settings.beepPreset에 저장)
@@ -26,10 +25,10 @@
     octaveVariation     — 같은 앱 재진입 시 tab idx ±7 clip
     waveform            — (hybrid 전용) nvwave+synthEngine.render_wav 경로 진입 트리거
 
-Phase 7.1에서 철회된 프리셋(drum_kit/lazer_pack/eight_bit_jump/daily_life/
-humor_pack) + Phase 8에서 철회된 프리셋(arcade_pop/coin_dash/glass_step)은
-이 모듈에 존재하지 않는다. 사용자 저장값에 그 id가 남아있어도
-`migrate_deprecated_preset`이 silent write로 CLASSIC_PRESET_ID로 돌린다.
+과거 철회된 프리셋(drum_kit/lazer_pack/eight_bit_jump/daily_life/humor_pack/
+arcade_pop/coin_dash/glass_step)은 이 모듈에 존재하지 않는다. 사용자 저장값에
+그 id가 남아있어도 `get_preset_or_classic`의 미지 id 폴백 경로가 classic으로
+흡수해 재생 자체는 정상 동작한다.
 """
 
 from logHandler import log
@@ -40,23 +39,6 @@ from .constants import BEEP_TABLE, MAX_ITEMS
 # 미지/폐기 id 폴백의 목표. settings.beepPreset이 삭제/손상된 경우에도 항상 이
 # id의 프리셋으로 재생되어야 한다.
 CLASSIC_PRESET_ID = "classic"
-
-
-# Phase 4~6 synthSpecs 5종(Phase 7에서 철회) + Phase 3/7.5 날카로운 hybrid 3종
-# (Phase 8에서 철회). 사용자 저장값에 남아 있을 수 있어 마이그레이션이 감지.
-# 새 철회 대상이 생기면 여기에 추가.
-_DEPRECATED_PRESET_IDS = frozenset({
-    # Phase 4~6 synthSpecs
-    "drum_kit",
-    "lazer_pack",
-    "eight_bit_jump",
-    "daily_life",
-    "humor_pack",
-    # Phase 8: 날카로운 hybrid 파형 3종
-    "arcade_pop",
-    "coin_dash",
-    "glass_step",
-})
 
 
 # ---------------------------------------------------------------------------
@@ -241,38 +223,10 @@ def get_preset_or_classic(preset_id: str) -> dict:
     return PRESETS[CLASSIC_PRESET_ID]
 
 
-def migrate_deprecated_preset(section) -> None:
-    """사용자 저장값에 폐기 프리셋 id가 남아있으면 classic으로 silent write.
-
-    `section`은 `config.conf[ADDON_NAME]` 섹션. configobj Section 객체로
-    dict-like API 제공. 호출은 `__init__.py`의 GlobalPlugin.__init__에서 한 번.
-    멱등 — 이미 마이그레이션된 환경에서 재호출해도 no-op.
-
-    `humorPackWarningShown` 같은 obsolete 키 청소는 `settings._OBSOLETE_KEYS`가
-    단일 소유. 여기서는 `beepPreset` 값 치환만 담당해 책임 분리 유지.
-    """
-    try:
-        preset_id = section.get("beepPreset")
-        # preset_id가 None(타입 불량/미존재)이면 set 멤버십이 False라 자연스럽게
-        # 분기 스킵. 문자열일 때만 매칭.
-        if preset_id in _DEPRECATED_PRESET_IDS:
-            log.warning(
-                f"mtwn: deprecated beepPreset={preset_id!r} migrated to "
-                f"{CLASSIC_PRESET_ID!r}"
-            )
-            section["beepPreset"] = CLASSIC_PRESET_ID
-    except Exception:
-        # 설정 섹션이 손상됐거나 타입이 예상과 다른 경우에도 플러그인 부팅을
-        # 막지 않는다. 최악의 경우 beepPlayer/matcher의 `get_preset_or_classic`
-        # 런타임 폴백이 classic으로 흡수.
-        log.exception(f"mtwn: migrate_deprecated_preset failed (section={section!r})")
-
-
 # 노출용 심볼 명시. 다른 모듈이 *-import를 쓰지 않아 형식적이지만 공개 표면을
 # 문서로도 남긴다.
 __all__ = (
     "PRESETS",
     "CLASSIC_PRESET_ID",
     "get_preset_or_classic",
-    "migrate_deprecated_preset",
 )
