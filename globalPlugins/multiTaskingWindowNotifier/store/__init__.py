@@ -14,12 +14,10 @@
       core.py                     # _load_state + 외부 API 본체
       io.py                       # JSON I/O + 원자적 저장
       assign.py                   # 순차 비프 인덱스 할당
-      migrations.py               # legacy_list / normalize_titles /
-                                  # v6→v7 clear / v7→v8 aliases 주입
-                                  # (Phase 6.3에서 서브패키지 → 단일 파일 통합)
 
-v9 이상 스키마가 필요할 때는 `migrations.py`에 함수 1개 추가 +
-`core._load_state` 파이프라인에 단계를 끼워 넣는다.
+Phase 1에서 v1~v8 자동 마이그레이션 경로를 전부 제거해 v9 고정 스펙으로
+운영한다. 향후 v10 이상 스키마가 필요해지면 별도 마이그레이션 모듈을
+신설하고 `core._load_state` 파이프라인에 단계를 끼워 넣는다.
 """
 
 from .core import (

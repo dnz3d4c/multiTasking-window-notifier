@@ -11,12 +11,8 @@
     - 원자적 저장 (`_save_to_disk`) — `.tmp` → `os.replace`
 
 비담당:
-    - 마이그레이션 (store.migrations)
     - 비프 인덱스 할당 (store.assign)
     - 핫 패스 API (store.core)
-
-Phase 3.2 시점: 본 모듈은 `appListStore.py`에서 이 6개 함수만 분리한 상태.
-기존 `appListStore.py`는 이 모듈을 재export해 외부 호출부 호환을 유지한다.
 """
 
 import json
@@ -42,10 +38,6 @@ def _json_path(list_path: str) -> str:
     return os.path.join(directory, "app.json")
 
 
-def _bak_path(list_path: str) -> str:
-    return list_path + ".bak"
-
-
 def _now_iso() -> str:
     return datetime.now().isoformat(timespec="seconds")
 
@@ -53,22 +45,22 @@ def _now_iso() -> str:
 # ------------ 메타 스켈레톤 ------------
 
 
-def _new_meta(key: str, scope: str = SCOPE_WINDOW, tabBeepIdx: int = None,
-              aliases: list = None) -> dict:
+def _new_meta(key: str, scope: str = SCOPE_WINDOW, aliases: list = None) -> dict:
     """새 메타 항목 생성.
 
-    scope=SCOPE_APP이면 key는 appId 자체, title은 빈 문자열, tabBeepIdx 없음.
+    scope=SCOPE_APP이면 key는 appId 자체, title은 빈 문자열.
     scope=SCOPE_WINDOW이면 key는 'appId|title' 복합키 형식이고 splitKey로 분해.
-    tabBeepIdx는 scope=window 전용 필드로, 같은 appId 내 고유 탭 비프(b) idx.
-    aliases는 v8부터 scope 무관 추가 필드로, title-only 역매핑에 쓰일 대체 제목
-    배열. 카카오톡처럼 Alt+Tab 오버레이 name과 foreground name이 다른 앱을
-    단일 entry로 매칭하기 위한 보조 키. 기본값은 빈 리스트.
+    tabBeepIdx는 scope=window에서 나중에 `_ensure_beep_assignments`가 채운다 —
+    여기서는 필드를 만들지 않는다.
+    aliases는 scope 무관 추가 필드로, title-only 역매핑에 쓰일 대체 제목 배열.
+    카카오톡처럼 Alt+Tab 오버레이 name과 foreground name이 다른 앱을 단일
+    entry로 매칭하기 위한 보조 키. 기본값은 빈 리스트.
     """
     if scope == SCOPE_APP:
         appId, title = key, ""
     else:
         appId, title = splitKey(key)
-    meta = {
+    return {
         "key": key,
         "scope": scope,
         "appId": appId,
@@ -78,9 +70,6 @@ def _new_meta(key: str, scope: str = SCOPE_WINDOW, tabBeepIdx: int = None,
         "switchCount": 0,
         "lastSeenAt": None,
     }
-    if scope == SCOPE_WINDOW and tabBeepIdx is not None:
-        meta["tabBeepIdx"] = int(tabBeepIdx)
-    return meta
 
 
 # ------------ JSON 역직렬화 ------------
@@ -88,23 +77,26 @@ def _new_meta(key: str, scope: str = SCOPE_WINDOW, tabBeepIdx: int = None,
 
 def _load_from_json(json_path: str):
     """Returns:
-        tuple(list, dict, int): 정상 로드 (items, appBeepMap, version).
-            파일 없거나 비어있으면 ([], {}, 0).
-        None: 파일은 있으나 파싱/구조 실패 (손상 신호).
+        tuple(list, dict): 정상 로드 (items, appBeepMap).
+            파일이 없으면 ([], {}) — 정상적 빈 상태.
+        None: 파일은 있으나 v9 스펙을 벗어남 (손상 신호).
 
-    None과 ([], {}, 0)를 구분하는 이유:
-        호출부(`_load_state`)가 "정상적으로 비어있음(=마이그레이션/백업 가능)"과
-        "손상으로 인한 빈 상태(=구형 app.list는 건드리지 말고 보존)"를 구분해야 한다.
+    손상 처리 정책 (Phase 1 마이그레이션 제거):
+        v9 고정 스펙만 수용한다. version!=9, scope 누락/무효, 구조 파손 등은
+        전부 None 반환으로 "손상"으로 취급되며, 호출부(`_load_state`)가
+        `corrupted=True` + 빈 목록으로 시작한다. 조용한 자동 보정 경로는
+        의도적으로 없다 — 사용자가 손상된 파일을 인지하고 수동 복구/삭제할
+        기회를 갖는다.
 
-    appBeepMap은 v4부터 디스크에 저장된다. v3 이하는 빈 dict로 반환되고 호출부가
-    거리 기반 알고리즘으로 재할당한다. version은 `_load_state`가 v4→v5
-    강제 재배정 판단에 사용한다.
+        다만 tabBeepIdx 누락은 손상으로 보지 않는다. `_ensure_beep_assignments`
+        가 신규 등록과 동일하게 채우는 "정상 복구 경로"다. aliases 역시 타입
+        불량이면 `_new_meta` 기본값 `[]`로 폴백하는 타입 보강 수준.
     """
     try:
         with open(json_path, "r", encoding="utf-8") as f:
             data = json.load(f)
     except FileNotFoundError:
-        return ([], {}, 0)
+        return ([], {})
     except Exception:
         log.error(f"mtwn: app.json load failed (JSON parse) path={json_path}", exc_info=True)
         return None
@@ -112,9 +104,13 @@ def _load_from_json(json_path: str):
     if not isinstance(data, dict):
         log.warning(f"mtwn: app.json root is not dict path={json_path}")
         return None
-    version = data.get("version", 0)
-    if not isinstance(version, int):
-        version = 0
+    version = data.get("version")
+    if not isinstance(version, int) or version != 9:
+        log.warning(
+            f"mtwn: app.json version={version!r} is not 9, treated as corrupted "
+            f"path={json_path}"
+        )
+        return None
     items = data.get("items", [])
     if not isinstance(items, list):
         log.warning(f"mtwn: app.json 'items' field is not list path={json_path}")
@@ -141,23 +137,22 @@ def _load_from_json(json_path: str):
             continue
         app_beep_map[app_id] = idx
 
-    # 필수 필드 보강 (옛 포맷/손상 대비).
-    # v2 → v3 → v4 → v8 자동 마이그레이션:
-    #   - scope 누락 → SCOPE_WINDOW로 보정 (v2는 창 단위만 등록 가능했음)
-    #   - 알 수 없는 scope 값 → SCOPE_WINDOW로 보정 (손상/오타 대비)
-    #   - scope=window의 tabBeepIdx 누락/무효 → 호출부가 거리 기반 재할당 (v3 이하)
-    #   - aliases 필드 부재 → []로 보정 (v7 이하). 타입 불량/요소 비문자열은 필터링.
+    # 필드 검증 (v9 스펙 엄수):
+    #   - key 부재 / dict 아님 → 단일 항목 무시 (항목 skip)
+    #   - scope 누락 / SCOPE_APP·SCOPE_WINDOW 외 값 → 전체 파일 손상으로 간주 → None
+    #   - tabBeepIdx 누락/무효 → `_ensure_beep_assignments`가 채움 (정상 복구)
+    #   - aliases 필드 타입 불량 → `_new_meta` 기본값 `[]`로 폴백 (타입 보강)
     fixed = []
     for it in items[:MAX_ITEMS]:
         if not isinstance(it, dict) or "key" not in it:
             continue
-        scope = it.get("scope", SCOPE_WINDOW)
+        scope = it.get("scope")
         if scope not in (SCOPE_APP, SCOPE_WINDOW):
             log.warning(
-                "mtwn: unknown scope %r in app.json item key=%r — coerced to %r",
-                scope, it.get("key"), SCOPE_WINDOW,
+                "mtwn: invalid scope %r in app.json item key=%r — file treated as corrupted",
+                scope, it.get("key"),
             )
-            scope = SCOPE_WINDOW
+            return None
         meta = _new_meta(it["key"], scope=scope)
         # 디스크 값으로 메타 덮어쓰기. 단 scope는 위에서 정규화한 값이 우선이므로
         # 디스크 값으로 다시 덮이지 않도록 별도 처리. tabBeepIdx는 scope=window에서
@@ -177,7 +172,7 @@ def _load_from_json(json_path: str):
             if k in meta:
                 meta[k] = v
         fixed.append(meta)
-    return (fixed, app_beep_map, version)
+    return (fixed, app_beep_map)
 
 
 # ------------ 원자적 저장 ------------
@@ -196,11 +191,8 @@ def _save_to_disk(list_path: str, state: dict) -> bool:
         return False
 
     tmp = json_path + ".tmp"
-    # v9: normalize_title 파이프라인 확장(em-dash 1순위 + 카운트 토큰 흡수)에
-    # 따른 일관성 보강. 데이터 스키마 자체는 v8과 동일(aliases 배열 보존)이며
-    # _load_state ⑥'' 단계가 aliases 재정규화 + 백업 1회 처리. 비프 인덱스
-    # 재배정/테이블 변경 없음. v7 이하 파일은 ⑥' ensure_aliases_v8를 거쳐
-    # 여기 도달.
+    # v9는 현재 유일 스펙. 이전 버전의 자동 마이그레이션 경로는 Phase 1에서
+    # 전부 제거됐고, 로드 시점에 version!=9는 손상으로 취급된다.
     payload = {
         "version": 9,
         "appBeepMap": dict(state.get("appBeepMap", {})),

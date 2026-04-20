@@ -14,7 +14,7 @@
     - 중간 gap은 재사용하지 않고 항상 max+1. 포화 시 구간 내 wrap + log.warning.
 
 비담당:
-    - I/O (store.io), 마이그레이션 (store.migrations), 핫 패스 (store.core).
+    - I/O (store.io), 핫 패스 (store.core).
 
 Phase 1 후속 예고 (Phase 3):
     가변 slotCount 프리셋(Phase 4 Drum Kit/Lazer Pack 등) 도입을 위해 할당 공간을
@@ -29,9 +29,6 @@ Phase 1 후속 예고 (Phase 3):
 from logHandler import log
 
 from ..constants import (
-    BEEP_TABLE_SIZE,
-    BEEP_USABLE_SIZE,
-    BEEP_USABLE_START,
     MAX_ITEMS,
     SCOPE_WINDOW,
 )
