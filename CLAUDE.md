@@ -169,8 +169,9 @@ multiTaskingWindowNotifier/
 ├── manifest.ini                           # 추가 기능 메타정보
 └── globalPlugins/
     └── multiTaskingWindowNotifier/
-        ├── __init__.py                    # GlobalPlugin + 이벤트 훅 진입점 (+ ScriptsMixin 결합)
-        ├── constants.py                   # ADDON_NAME, MAX_ITEMS(128), BEEP_TABLE(C major 온음계 35음), BEEP_TABLE_SIZE(35)
+        ├── __init__.py                    # GlobalPlugin + 이벤트 훅 진입점 (+ ScriptsMixin 결합). 부팅 시 presets.migrate_deprecated_preset 호출
+        ├── constants.py                   # ADDON_NAME, MAX_ITEMS(128), BEEP_TABLE(C major 온음계 35음), BEEP_TABLE_SIZE(35), SCOPE_*, ALT_TAB_*, FLUSH_*
+        ├── presets.py                     # 프리셋 데이터 단일 소유자 (PRESETS 8종, freqs 빌더, 부팅 assert, get_preset_or_classic, migrate_deprecated_preset) - Phase 7.1 신설
         ├── appIdentity.py                 # 앱 식별/복합키 + normalize_title
         ├── store/                         # v7 JSON 저장소 서브패키지 (Phase 3 분해)
         │   ├── __init__.py                # 공개 API 재export (load/save/record_switch/flush/…)
@@ -180,7 +181,8 @@ multiTaskingWindowNotifier/
         │   └── migrations.py              # app.list → JSON / title 정규화·dedup / v6→v7 clear 통합 (Phase 6.3)
         ├── tabClasses.py                  # 앱별 editor/overlay wcn 매핑 (상수 조회 전용)
         ├── windowInfo.py                  # 창 정보·경로 헬퍼 (title normalize 적용)
-        ├── beepPlayer.py                  # v4 2음 비프 (core.callLater 기반 gap 예약)
+        ├── synthEngine.py                 # PCM 파형 합성 + wav 파일 캐시 (render_wav + 기본 파형 7종 sine/square/pulse50/pulse25/pulse12/triangle/saw)
+        ├── beepPlayer.py                  # 2음 비프 재생 조합 (classic 계열 tones.beep 경로 / hybrid waveform용 synthEngine+nvwave 경로)
         ├── listDialog.py                  # 목록 표시 wx.Dialog
         ├── settings.py                    # NVDA config 스키마 (confspec)
         ├── settingsPanel.py               # NVDA 설정 > 창 전환 알림 패널
