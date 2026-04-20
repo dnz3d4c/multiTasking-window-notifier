@@ -94,8 +94,36 @@ _PENTATONIC_FREQS = [
 ]
 
 
+# Moss Bell: A 자연단음계 7음(A B C D E F G) × 5옥타브 = 35.
+# A2(110Hz) ~ G7(3136Hz). classic과 음 개수·옥타브는 같지만 시작음과 음정
+# 구조가 다르다 — "밝은 도레미"에 피로한 사용자의 애조 대체재.
+# 반음이 있어(B→C, E→F) pentatonic의 "중립적 차분함"과 구별된다.
+_A_MINOR_FREQS = [
+    110, 123, 130, 146, 164, 174, 196,       # A2 B2 C3 D3 E3 F3 G3
+    220, 246, 261, 293, 329, 349, 392,       # A3 B3 C4 D4 E4 F4 G4
+    440, 493, 523, 587, 659, 698, 784,       # A4 B4 C5 D5 E5 F5 G5
+    880, 987, 1047, 1175, 1319, 1397, 1568,  # A5 B5 C6 D6 E6 F6 G6
+    1760, 1976, 2093, 2349, 2637, 2794, 3136,  # A6 B6 C7 D7 E7 F7 G7
+]
+
+
+# Glass Step: whole-tone(C D E F# G# A#) × 6옥타브 - 최상단 1음 = 35.
+# C2(65Hz) ~ G#7(3322Hz). 반음이 완전 부재해 장/단조 어디에도 속하지 않는
+# "붕 뜬" 공간감. classic/moss_bell/fifths와 음정 구조 자체가 다르다.
+# 최상단 A#7(~3729Hz)은 상한 근접 + 쇳소리 경계라 제거.
+_WHOLE_TONE_FREQS = [
+    65, 73, 82, 92, 104, 117,           # C2 D2 E2 F#2 G#2 A#2
+    130, 146, 164, 185, 208, 233,       # C3 D3 E3 F#3 G#3 A#3
+    261, 293, 329, 370, 415, 466,       # C4 D4 E4 F#4 G#4 A#4
+    523, 587, 659, 740, 831, 932,       # C5 D5 E5 F#5 G#5 A#5
+    1047, 1175, 1319, 1480, 1661, 1865, # C6 D6 E6 F#6 G#6 A#6
+    2093, 2349, 2637, 2960, 3322,       # C7 D7 E7 F#7 G#7 (A#7 제거)
+]
+
+
 # ---------------------------------------------------------------------------
-# 프리셋 dict — 현재 6개 (Phase 7.5에서 moss_bell / glass_step 추가 예정)
+# 프리셋 dict — Phase 7.5 기준 8개 (classic/pentatonic/fifths + arcade/coin/soft
+# + moss_bell/glass_step)
 # ---------------------------------------------------------------------------
 
 PRESETS = {
@@ -200,6 +228,45 @@ PRESETS = {
         "descriptionLabel": "삼각파. 부드럽고 따뜻한 8비트 배경음 느낌.",
         "freqs": BEEP_TABLE,
         "waveform": "triangle",
+        "durationMs": 50,
+        "gapMs": 100,
+        "suppressRepeat": False,
+        "octaveVariation": False,
+        "gain": 1.0,
+    },
+    # Phase 7.5: 라인업의 빈 축을 채우는 tonal 2종. 다관점 토론으로 선정.
+    # moss_bell — 정서축(애조) 신규. classic/pentatonic/fifths가 모두 밝은 장조
+    # 또는 중립이라 애조가 비어있었다.
+    # glass_step — 파형축(saw) + 음정구조축(whole-tone) 동시 신규. 현 라인업
+    # 파형은 sine/pulse50/pulse25/triangle이라 saw 미사용, 음정은 전부 장조/
+    # 5음계/5도 진행이라 "장/단조 어디에도 속하지 않는" 구조가 비어있었다.
+    "moss_bell": {
+        "id": "moss_bell",
+        "nameLabel": "Moss Bell",
+        "type": "tonal",
+        "slotCount": 35,
+        "recommendedMaxApps": 35,
+        "optIn": False,
+        "previewSlots": (0, 14),  # A2, A4
+        "descriptionLabel": "A 자연단음계 7음 × 5옥타브. 차분한 애조.",
+        "freqs": _A_MINOR_FREQS,
+        "durationMs": 50,
+        "gapMs": 100,
+        "suppressRepeat": False,
+        "octaveVariation": False,
+        "gain": 1.0,
+    },
+    "glass_step": {
+        "id": "glass_step",
+        "nameLabel": "Glass Step",
+        "type": "hybrid",
+        "slotCount": 35,
+        "recommendedMaxApps": 35,
+        "optIn": False,
+        "previewSlots": (0, 21),  # C2, F#5
+        "descriptionLabel": "whole-tone 6음 × 6옥타브, 톱니파. 차가운 디지털.",
+        "freqs": _WHOLE_TONE_FREQS,
+        "waveform": "saw",
         "durationMs": 50,
         "gapMs": 100,
         "suppressRepeat": False,
