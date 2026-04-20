@@ -386,14 +386,36 @@ NVDA 소스(`ext/nvda/source/`)와 프로젝트 소스를 교차 탐색해 "NVDA
 
 **차기**: Phase 5(Daily Life + Humor Pack). 진단 덤프 단축키 / recommendedMaxApps UI 경고는 Phase 5로 이월.
 
+### 비프 프리셋 확장 시리즈 Phase 5 (완료)
+
+**일상 소리 프리셋(Daily Life 24슬롯) + 옵트인 Humor Pack(16슬롯)**. 기본 9프리셋 + 옵트인 1 = 총 11프리셋. 시리즈 완결.
+
+**신규 프리셋**:
+- `daily_life` (atonal, 24슬롯, recommendedMaxApps=24, optIn=False): 전화벨/초인종/노크/문닫기/박수×2/휘파람/기침/재채기/하품/시계 째깍/알람/카메라 셔터/물방울/탁상종/뱃고동/고양이/개/새/뻐꾸기/까마귀/닭/귀뚜라미/천둥. 각 슬롯 synthSpec은 pulse50/sine/square/saw/noise + envelope(exp_decay/pluck) 조합. Portamento 활용으로 만화풍 "미끄러지는 느낌" 표현(doorbell E5→C5, cat_meow 600→900, water_drop 400→1200).
+- `humor_pack` (atonal, 16슬롯, recommendedMaxApps=16, **optIn=True**): 방귀 3종(short/long/wobble) + 트림 2종 + 딸꾹질 + 큰 재채기 + 큰 기침 + 코골기 + 혀차기 + 뽀뽀 + boing fall + 슬라이드 휘파람(상/하) + "하" 웃음 + cartoon slip.
+
+**1회성 경고**:
+- `settings.py` CONFSPEC에 `humorPackWarningShown: boolean(default=False)` 추가.
+- `settingsPanel.onSave`에서 **optIn=True 프리셋** 저장 시 플래그 False면 `gui.messageBox`로 1회 경고:
+  - 제목: "유머 프리셋 안내"
+  - 본문: "이 프리셋은 방귀/트림 같은 유머성 소리를 포함합니다. 회의나 공공장소에서는 다른 프리셋을 선택하시기를 권장합니다."
+  - 확인 후 플래그 True 갱신. 재선택 시 조용히 통과.
+- NVDA 코어(`gui/settingsDialogs.py:GeneralSettingsPanel.onSave`)의 modal 호출 패턴과 동일 경로 — 접근성/저장 타이밍 검증됨.
+
+**검증**:
+- NVDA Addon Development Specialist 리뷰 통과("반드시 수정" 0건, 제안 2건 반영: `wx.MessageBox` → `gui.messageBox` 관용 패턴 + `conf.get` → `conf[key]` 스타일 일관성).
+- 186 unit 테스트 전건 PASS. 빌드 23 files 78.5 KB.
+- **실기 검증 필요**: daily_life/humor_pack 각각 선택 후 Alt+Tab 청취. humor_pack 첫 선택 시 경고 1회 표시 + 재선택 시 무음 확인.
+
+**Phase 5 범위 축소 결정**:
+- 진단 덤프 단축키(NVDA+Shift+B) — YAGNI, 실사용 요청 전 보류.
+- `recommendedMaxApps` 동적 UI 경고(현재 등록 앱 수 vs 권장 수 비교) — settingsPanel이 appListFile 경로를 모르는 구조적 한계. descriptionLabel에 "권장 ≤N앱" 이미 정적 명시로 갈음.
+
 ---
 
 ## 현재 로드맵
 
-### 비프 프리셋 확장 시리즈 (Phase 5, 진행 중)
-
-상세 플랜: `C:\Users\advck\.claude\plans\gleaming-drifting-dragonfly.md`.
-- **Phase 5** — 일상 소리 프리셋(Daily Life 24슬롯) + 옵트인 Humor Pack(16슬롯, 1회성 경고). 방귀/트림/딸꾹질 등은 만화풍 PCM 합성으로만 구현. 설정 패널에 `recommendedMaxApps` 경고 레이블 추가.
+*(활성 로드맵 없음. 비프 프리셋 확장 시리즈 Phase 1~5 완료. 총 11프리셋 운영. 차기 작업은 사용자 요청 시 재시작.)*
 
 ---
 

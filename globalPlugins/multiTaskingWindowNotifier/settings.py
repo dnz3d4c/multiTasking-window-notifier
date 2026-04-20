@@ -32,6 +32,9 @@ CONFSPEC = {
     "beepGapMs": "integer(default=100, min=0, max=200)",
     "debugLogging": "boolean(default=False)",
     "beepPreset": 'string(default="classic")',
+    # Phase 5: humor_pack 프리셋 첫 선택 시 1회성 공공장소 주의 경고를 띄우기
+    # 위한 플래그. 경고 표시 후 True로 갱신해 재선택 시 조용히 넘어간다.
+    "humorPackWarningShown": "boolean(default=False)",
 }
 
 # 과거 버전 confspec에 있었으나 의미가 사라져 제거된 키 목록.
