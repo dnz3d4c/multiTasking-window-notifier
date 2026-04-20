@@ -40,9 +40,11 @@ from .appIdentity import getAppId, normalize_title
 def handle(plugin, obj) -> None:
     """foreground 창 본체의 name 변경일 때만 matcher로 위임."""
     if obj is None:
+        # NVDA 부팅/전환 과도기에 일시적 None. 정상 경로이므로 로그 없이 탈출.
         return
     fg = api.getForegroundObject()
     if fg is None:
+        # foreground 미확정 초기 단계. 정상.
         return
     # 조기 컷: obj의 windowHandle이 foreground 창과 같아야 "창 본체 name 변경"
     # 으로 간주. 메뉴 항목/DOM 자식/링크 등은 hwnd가 달라 즉시 걸러지고 문자열
@@ -51,6 +53,10 @@ def handle(plugin, obj) -> None:
         obj_hwnd = int(getattr(obj, "windowHandle", 0) or 0)
         fg_hwnd = int(getattr(fg, "windowHandle", 0) or 0)
     except Exception:
+        # windowHandle이 non-int이거나 접근 중 예외. 이론상 거의 발생 안 하나
+        # 재현 시 추적용 디버그 로그. ui.message는 내지 않음 — 정상 이벤트 중
+        # 일부만 실패하는 조용한 케이스라 사용자 알림은 소음.
+        log.debug("mtwn: nameChange hwnd coerce failed", exc_info=True)
         return
     if obj_hwnd == 0 or obj_hwnd != fg_hwnd:
         return

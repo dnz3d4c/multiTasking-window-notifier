@@ -51,6 +51,7 @@ def dispatch(plugin, obj) -> None:
         _log_focus_diag(obj)
 
     if obj is None:
+        # NVDA 이벤트 내부 상태에서 일시적 None이 올 수 있는 정상 경로. 로그 없이 탈출.
         return
 
     wcn = getattr(obj, "windowClassName", "")

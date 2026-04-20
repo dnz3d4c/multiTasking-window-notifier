@@ -48,6 +48,7 @@ def handle(plugin, obj) -> None:
             전달하므로 api.getForegroundObject()와 동일.
     """
     if obj is None:
+        # NVDA 부팅 초기에 foreground obj가 일시적 None인 정상 케이스. 로그 없이 탈출.
         return
     appId = getAppId(obj)
     # getAppId는 보통 'unknown' fallback을 두기 때문에 빈 문자열로 떨어지는

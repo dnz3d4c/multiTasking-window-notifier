@@ -123,6 +123,16 @@ def _load_state(list_path: str) -> dict:
       ⑥' v7 이하 → v8 aliases 필드 주입 (ensure_aliases_v8)
       ⑥'' v8 이하 → v9 .v8.bak 백업 + aliases 재정규화 (em-dash + 카운트 흡수)
       ⑦ 캐시 등록
+
+    실패 정책 (트랜잭션 대신 멱등 재시도):
+        각 단계는 `_save_to_disk` 성공 시에만 `state["dirty"]=False`를 세팅한다.
+        디스크 쓰기가 실패하면 `dirty=True`가 유지되어 다음 `flush()`에서
+        자연스럽게 재시도된다. `_normalize_titles_in_place`, `_ensure_beep_assignments`,
+        `renormalize_aliases_v9` 등 모든 마이그레이션 함수가 멱등이므로 N회
+        재시도해도 결과 동일. 따라서 트랜잭션/롤백 경로는 의도적으로 두지
+        않는다 — 향후 유지보수 시 "부분 실패 방어"를 이유로 복잡한 상태 머신을
+        도입하지 말 것. 부분 저장으로 인한 디스크·메모리 괴리 가능성은
+        남아있으나 `_save_to_disk` 실패는 극저 빈도이고 사용자 체감 영향 0.
     """
     # ① 캐시
     if list_path in _states:
