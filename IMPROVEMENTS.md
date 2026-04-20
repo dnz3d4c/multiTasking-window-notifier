@@ -386,6 +386,48 @@ NVDA 소스(`ext/nvda/source/`)와 프로젝트 소스를 교차 탐색해 "NVDA
 
 **차기**: Phase 5(Daily Life + Humor Pack). 진단 덤프 단축키 / recommendedMaxApps UI 경고는 Phase 5로 이월.
 
+### 비프 프리셋 확장 시리즈 Phase 6 (완료) — 날카로움/볼륨 완화 + 슬롯 축소
+
+Phase 5 실기 사용 후 사용자 피드백 4건(날카로움/볼륨 문제/실측 데이터 근거 부재/로직 복잡성)에 대응. 3관점 에이전트 팀(사운드 디자이너 Foley 20년 / 접근성 UX / 엔지니어링 회의론자) 재진단 결과 **"전화벨/방귀 등 실제 소리는 단일 synthSpec 구조로 원리적 재현 불가"** 합의. 구조 확장(voices/AM/cadence)은 "복잡도 억제" 원칙 위반 → **재현 불가 슬롯 제거 + 공통 경로 개선 + 볼륨 슬라이더** 방향 전환.
+
+**변경 (synthEngine.py)**:
+- §1 어택/릴리즈 램프: `_ATTACK_MS=1`, `_RELEASE_MS=2`, `_edge_ramp()`. 샘플 0에서 ±peak 계단 도약으로 발생하던 클릭/팝 트랜지언트 제거. 짧은 duration(15ms clock_tick 등) 안전 위해 `n_samples // 3` cap + 1/2ms 값으로 본체 손상 최소화.
+- §2 파형별 게인 dict: sine 1.0 / triangle 0.95 / pulse50/square 0.55 / pulse25 0.5 / pulse12 0.4 / saw 0.55 / noise 0.6. Crest factor 역보정으로 파형 간 체감 RMS 균일화.
+- §3 노이즈 1-pole IIR LPF: `y = y + α*(x - y)`, spec의 `noiseLpfHz`(기본 1200). drum_kit hihat_closed=4000 / hihat_open=3000 / cymbal=5000. `_spec_cache_key`에 cutoff 포함 + 시드 문자열에도 포함해 결정성 유지.
+- §5 `volume` 파라미터(50~150%) 전파: `render_wav`/`render_spec`/캐시 키까지.
+- §8 `_ENGINE_VERSION=2` 캐시 suffix.
+- 리뷰 S2 반영: `amp = min(..., 32767)` clamp + 샘플 레벨 `v = max(-1.0, min(1.0, v))` clamp로 volume=150 + sine/triangle 조합의 int16 OverflowError 방어.
+
+**변경 (settings/beepPlayer/settingsPanel)**:
+- `settings.CONFSPEC`에 `beepVolume: integer(default=100, min=50, max=150)`.
+- `settingsPanel`에 `wx.Slider`(50~150, SL_HORIZONTAL | SL_VALUE_LABEL). "비프 볼륨 (%)" 라벨. onSave 저장. `_onPreviewClicked`가 slider 현재값을 volume override로 전달(저장 전 즉시 체감).
+- `beepPlayer._resolve_volume(None→settings/명시값 override)` 헬퍼. `_play_via_synth`/`_play_spec`/`_play_one_beep`/`_schedule_second_*`에 `volume=None` 추가. `play_beep` 시그니처 유지(matcher 호환) + docstring에 정책 주석. classic(tones.beep 경로)은 volume 무시 — NVDA 내부 볼륨 체계 준수.
+
+**변경 (constants.py) — §9 슬롯 축소**:
+- `daily_life` **24 → 12슬롯**. 제거 12: phone_ring/thunder/cat_meow/dog_bark/crow_caw/chicken/cough/sneeze/yawn/clap_double/camera_shutter/desk_bell (모두 단일 synthSpec 구조로 재현 불가 L/X 등급).
+- `humor_pack` **16 → 8슬롯**. 제거 8: fart_long/fart_wobble/burp_long/sneeze_loud/cough_loud/snore/tongue_cluck/kiss (fart류 변형 중복 + 생리음 구조적 불가).
+- previewSlots 재조정(daily_life (0,3)=doorbell→clap / humor_pack (0,3)=fart_short→boing_fall).
+- freq 교정: cricket(5000→3500, duration 50→70) / bird_chirp(endFreq 3000→2400) / cartoon_slip(freq 2000→1400). 모두 §7 `_MAX_SPEC_FREQ=3500` 상한 준수.
+- drum_kit cymbal envelope pluck→exp_decay + noiseLpfHz=5000.
+- 부팅 assert에 `_MAX_SPEC_FREQ=3500` validator 추가.
+
+**기존 사용자 데이터 호환 (app.json v8)**: stored idx는 [0, 128) 공간. 축소된 프리셋(12/8) 사용 중이면 재생 시점 modulo wrap으로 자동 매핑. 예: daily_life 사용자 15개 앱 등록 → 15 % 12 = 3번 슬롯으로 자연 wrap. 침묵 없음. 단 제거된 phone_ring(원 0번) 자리의 소리가 doorbell로 바뀌는 등 **체감 변화 있음** — 트레이드오프 수용.
+
+**정직한 답변 (사용자 3가지 질문)**:
+- "전화기 소리 어떻게?": 단일 synthSpec 구조로 불가(dual-tone+AM+cadence 동시 필요). 제거가 정답. 구조 확장은 Non-goal.
+- "방귀 실효과 검증?": 논문(Bharucha 2010)에 주파수 100-200Hz 난류 명시 있으나 saw 주기파로는 재현 불가. fart_short만 대표로 유지.
+- "실측 데이터로 구현?": S/A급 근거 있는 슬롯(phone_ring ITU-T, 뻐꾸기 G4→E4 등) 존재하나 단일 synthSpec 한계로 "진짜처럼" 안 됨. 재현 불가 슬롯 제거가 엄밀한 답.
+
+**검증**:
+- NVDA Addon Development Specialist 리뷰 통과. 반드시 수정 0건(R1 문서 주석 이슈), 개선 제안 4건 중 S1(어택 램프 5→1ms) + S2(amp clamp) 즉시 반영.
+- 186 unit 테스트 전건 PASS. `test_beep_pair.py`의 modulo wrap 테스트는 classic 기준이라 축소 영향 없음.
+- 빌드: `multiTaskingWindowNotifier-0.9-dev.nvda-addon` 23 files 81.4 KB.
+- **실기 검증 필요**: (a) arcade_pop/coin_dash/soft_retro가 classic 대비 체감 볼륨 유사 (§2 효과), (b) 첫 음 클릭/팝 사라짐 (§1 효과), (c) drum_kit hihat/cymbal이 colored noise로 부드러워짐 (§3 효과), (d) daily_life 12슬롯/humor_pack 8슬롯만 재생 (§9 효과), (e) 설정 패널 비프 볼륨 슬라이더 50/100/150 체감 차이.
+
+**Non-goals 재확인**: voices layer / AM / FM / cadence 확장 / RMS 정규화 / 40슬롯 실측 전수 조사 / 슬롯 이름 rename / `_AMPLITUDE` 전역 하향.
+
+---
+
 ### 비프 프리셋 확장 시리즈 Phase 5 (완료)
 
 **일상 소리 프리셋(Daily Life 24슬롯) + 옵트인 Humor Pack(16슬롯)**. 기본 9프리셋 + 옵트인 1 = 총 11프리셋. 시리즈 완결.

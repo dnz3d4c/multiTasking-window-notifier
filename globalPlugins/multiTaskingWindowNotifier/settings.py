@@ -35,6 +35,10 @@ CONFSPEC = {
     # Phase 5: humor_pack 프리셋 첫 선택 시 1회성 공공장소 주의 경고를 띄우기
     # 위한 플래그. 경고 표시 후 True로 갱신해 재선택 시 조용히 넘어간다.
     "humorPackWarningShown": "boolean(default=False)",
+    # Phase 6: nvwave 경로(Hybrid/Percussive/Atonal 프리셋) 볼륨 슬라이더.
+    # 50~150% 범위로 clipping 위험 최소화. classic(tones.beep)은 NVDA 내부
+    # 볼륨 체계를 따르므로 영향 없음.
+    "beepVolume": "integer(default=100, min=50, max=150)",
 }
 
 # 과거 버전 confspec에 있었으나 의미가 사라져 제거된 키 목록.

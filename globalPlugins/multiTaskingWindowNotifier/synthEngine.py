@@ -55,6 +55,47 @@ import wave
 SAMPLE_RATE = 44100
 _AMPLITUDE = 0.8
 
+# Phase 6: 엔진 버전 suffix. 캐시 키에 포함해 §1 어택 램프/§2 파형 게인/§3 노이즈
+# LPF 도입 이전 구 wav 파일과 자동 분리. 업그레이드 후 구 캐시는 OS temp cleanup
+# 위임.
+_ENGINE_VERSION = 2
+
+# Phase 6 §1: 어택/릴리즈 램프. 모든 PCM 샘플의 양끝 1/2ms를 선형 보간으로 fade.
+# 샘플 0에서 ±peak 계단 도약이 만들어내던 "클릭/팝" 트랜지언트를 제거해 전체
+# 프리셋의 체감 날카로움을 크게 낮춘다. envelope이 있든 없든 최종 곱셈으로 적용.
+# 초기 3/5ms는 clock_tick(15ms) 같은 짧은 슬롯의 본체를 거의 삼켜서 청각 전달이
+# 약해짐 → 1/2ms로 낮춤. 클릭 제거는 여전히 유효(22.7μs 계단이 사라지면 충분).
+_ATTACK_MS = 1
+_RELEASE_MS = 2
+
+
+def _edge_ramp(i: int, n_samples: int, sample_rate: int) -> float:
+    """양끝 선형 램프. attack_n/release_n은 duration 짧을 때 n_samples//3 cap."""
+    if n_samples <= 0:
+        return 0.0
+    attack_n = min(n_samples // 3, max(1, int(sample_rate * _ATTACK_MS / 1000)))
+    release_n = min(n_samples // 3, max(1, int(sample_rate * _RELEASE_MS / 1000)))
+    if i < attack_n:
+        return i / attack_n
+    if i >= n_samples - release_n:
+        return max(0.0, (n_samples - i) / release_n)
+    return 1.0
+
+
+# Phase 6 §2: 파형별 crest factor 역보정. 같은 peak에서 sine(RMS 0.707)과 square
+# (RMS 1.0)이 체감 +3dB 차이 → 각 파형에 대응 스케일 적용으로 라우드니스 균일화.
+# pulse12와 pulse25는 고조파 집중으로 귀 민감대(2~4kHz)에 에너지 몰림 → 추가 감쇠.
+_WAVEFORM_GAIN = {
+    "sine": 1.00,
+    "triangle": 0.95,
+    "pulse50": 0.55,
+    "square": 0.55,
+    "pulse25": 0.50,
+    "pulse12": 0.40,
+    "saw": 0.55,
+    "noise": 0.60,
+}
+
 # Precomputed sine table. 1024개 sample이면 표준 tones 대역(130~4000Hz)에서
 # 인접 샘플 사이 보간 없이도 청각 구분 불가능 수준의 오차. LUT 키도 1 위상
 # (0..1) 기준이라 주파수와 독립적이라 재사용 효율 최대.
@@ -213,6 +254,7 @@ def _render_pcm_int16(
     freq_hz: float,
     duration_ms: int,
     sample_rate: int,
+    volume: int = 100,
 ) -> bytes:
     """16bit signed LE PCM 바이트 생성.
 
@@ -223,7 +265,15 @@ def _render_pcm_int16(
     n_samples = int(sample_rate * duration_ms / 1000)
     if n_samples <= 0:
         return b""
-    amp = int(_AMPLITUDE * 32767)
+    # Phase 6 §2: 파형별 게인 보정. noise는 §3에서 별도 처리하므로 여기선 dict 조회
+    # 결과 그대로 사용.
+    # Phase 6 §5: 사용자 beepVolume(50~150%) 반영.
+    # 리뷰 S2: amp 계산 결과를 32767로 clamp. volume=150 + wf_gain 1.0(sine) +
+    # _AMPLITUDE 0.8 = 39320으로 int16 범위(±32767) 초과 → `array.array('h')`
+    # OverflowError 발생 가능. amp 자체를 clamp해 안전.
+    wf_gain = _WAVEFORM_GAIN.get(waveform_name, 1.0)
+    vol_gain = max(0.0, volume / 100.0)
+    amp = min(int(_AMPLITUDE * wf_gain * vol_gain * 32767), 32767)
     samples = array.array("h")  # signed short 16bit
 
     if waveform_name == "noise":
@@ -231,8 +281,12 @@ def _render_pcm_int16(
         # 같은 (파형, freq, duration, sample_rate) 입력 = 같은 출력 보장.
         seed = f"{waveform_name}|{int(freq_hz)}|{duration_ms}|{sample_rate}"
         rng = random.Random(seed)
-        for _ in range(n_samples):
+        for i in range(n_samples):
             v = rng.uniform(-1.0, 1.0)
+            # Phase 6 §1: 양끝 어택/릴리즈 램프로 클릭/팝 제거.
+            v *= _edge_ramp(i, n_samples, sample_rate)
+            # 방어적 clamp — noise는 이미 ±1 범위지만 fp 오차 대비.
+            v = max(-1.0, min(1.0, v))
             samples.append(int(v * amp))
     else:
         gen = WAVEFORMS.get(waveform_name)
@@ -253,10 +307,14 @@ def _render_pcm_int16(
             gen = _gen_sine
         phase_step = freq_hz / sample_rate
         phase = 0.0
-        for _ in range(n_samples):
+        for i in range(n_samples):
             # phase는 [0, 1) 범위로 유지. 부동소수점 누적 오차는 짧은 비프(≤400ms)
             # 기준 무시 가능.
             v = gen(phase)
+            # Phase 6 §1: 어택/릴리즈 램프.
+            v *= _edge_ramp(i, n_samples, sample_rate)
+            # 방어적 clamp — gen은 ±1 범위지만 램프 적용 후도 ±1 이내라 safe.
+            v = max(-1.0, min(1.0, v))
             samples.append(int(v * amp))
             phase += phase_step
             if phase >= 1.0:
@@ -282,6 +340,7 @@ def render_wav(
     freq_hz: float,
     duration_ms: int,
     sample_rate: int = SAMPLE_RATE,
+    volume: int = 100,
 ) -> str:
     """캐시된 wav 파일 경로 반환. 호출자는 `nvwave.playWaveFile(path)`로 재생.
 
@@ -294,7 +353,10 @@ def render_wav(
     검사를 매 호출에 하면 캐시 장점이 깎이므로 hit 시 존재 가정. 희귀한 누락은
     `beepPlayer`의 외곽 try/except에서 `tones.beep` 폴백으로 흡수.
     """
-    key = (waveform_name, int(freq_hz), int(duration_ms), int(sample_rate))
+    # Phase 6: _ENGINE_VERSION + volume 포함. §1~§3 도입 전 캐시 분리 + 볼륨 변경
+    # 시 새 파일 생성. volume은 보통 프리셋 고정값이라 실제 캐시 분산은 경미.
+    key = ("wav", _ENGINE_VERSION, waveform_name, int(freq_hz),
+           int(duration_ms), int(sample_rate), int(volume))
 
     with _cache_lock:
         if key in _cache:
@@ -306,7 +368,7 @@ def render_wav(
 
     # 렌더링은 락 밖에서 수행 (CPU bound 블로킹 방지). 동일 키에 대한 중복 렌더링은
     # 결과가 결정론적으로 동일하므로 파일 덮어쓰기 안전.
-    pcm = _render_pcm_int16(waveform_name, freq_hz, duration_ms, sample_rate)
+    pcm = _render_pcm_int16(waveform_name, freq_hz, duration_ms, sample_rate, volume)
     _write_wav_file(pcm, path, sample_rate)
 
     with _cache_lock:
@@ -330,7 +392,7 @@ def render_wav(
 # ---------------------------------------------------------------------
 
 
-def _render_spec_pcm(spec: dict, sample_rate: int) -> bytes:
+def _render_spec_pcm(spec: dict, sample_rate: int, volume: int = 100) -> bytes:
     """단일 synthSpec → PCM int16 LE bytes.
 
     spec 지원 필드:
@@ -349,25 +411,49 @@ def _render_spec_pcm(spec: dict, sample_rate: int) -> bytes:
     duration_ms = int(spec.get("durationMs", 50))
     envelope_name = spec.get("envelope")
     amp_scale = float(spec.get("amp", 1.0))
+    # Phase 6 §3: 노이즈 colored LPF 컷오프. spec이 명시 안 하면 기본 1200Hz.
+    # 중저역 bias로 실제 자연 노이즈(노크/박수/기침 등)에 근접.
+    noise_lpf_hz = float(spec.get("noiseLpfHz", 1200))
 
     n_samples = int(sample_rate * duration_ms / 1000)
     if n_samples <= 0:
         return b""
 
-    amp = int(_AMPLITUDE * amp_scale * 32767)
+    # Phase 6 §2: 파형별 게인. noise는 별도 처리(아래) — waveform_gain 적용 후 LPF
+    # 볼륨 손실 보정 계수(1.8)을 추가로 곱해 체감 밸런스 유지.
+    # Phase 6 §5: 사용자 beepVolume(50~150%) 반영.
+    # 리뷰 S2: amp 계산 결과를 int16 상한으로 clamp. volume=150 + amp_scale>1 등
+    # 조합에서 `array.array('h')` OverflowError 발생 가능.
+    wf_gain = _WAVEFORM_GAIN.get(waveform, 1.0)
+    vol_gain = max(0.0, volume / 100.0)
+    amp = min(int(_AMPLITUDE * amp_scale * wf_gain * vol_gain * 32767), 32767)
     samples = array.array("h")
     envelope_fn = _ENVELOPES.get(envelope_name) if envelope_name else None
 
     if waveform == "noise":
+        # Phase 6 §3: 1-pole IIR LPF. α = dt / (RC + dt), RC = 1/(2π·fc).
+        rc = 1.0 / (2.0 * math.pi * noise_lpf_hz)
+        dt = 1.0 / sample_rate
+        alpha = dt / (rc + dt)
+        # 시드에 cutoff 포함해 동일 spec + 동일 cutoff일 때 결정론성 보장.
         seed = (
             f"spec|noise|{start_freq}|{end_freq}|{duration_ms}|"
-            f"{envelope_name}|{amp_scale}|{sample_rate}"
+            f"{envelope_name}|{amp_scale}|{noise_lpf_hz}|{sample_rate}"
         )
         rng = random.Random(seed)
+        y = 0.0
         for i in range(n_samples):
-            v = rng.uniform(-1.0, 1.0)
+            x = rng.uniform(-1.0, 1.0)
+            # 1-pole low-pass 필터
+            y = y + alpha * (x - y)
+            # LPF 볼륨 손실 보정(cutoff에 따라 다르나 근사 1.8배가 무난)
+            v = y * 1.8
             if envelope_fn is not None:
                 v *= envelope_fn(i, n_samples)
+            # Phase 6 §1: 어택/릴리즈 램프 — 클릭/팝 제거.
+            v *= _edge_ramp(i, n_samples, sample_rate)
+            # 클리핑 — wf_gain이 작아 대부분 안 걸리나 방어.
+            v = max(-1.0, min(1.0, v))
             samples.append(int(v * amp))
     else:
         gen = WAVEFORMS.get(waveform)
@@ -392,6 +478,10 @@ def _render_spec_pcm(spec: dict, sample_rate: int) -> bytes:
             v = gen(phase)
             if envelope_fn is not None:
                 v *= envelope_fn(i, n_samples)
+            # Phase 6 §1: 어택/릴리즈 램프.
+            v *= _edge_ramp(i, n_samples, sample_rate)
+            # 방어적 clamp — envelope boing은 cos 기반이라 ±1 내지만 fp 오차 대비.
+            v = max(-1.0, min(1.0, v))
             samples.append(int(v * amp))
             phase += phase_step
             if phase >= 1.0:
@@ -400,34 +490,42 @@ def _render_spec_pcm(spec: dict, sample_rate: int) -> bytes:
     return samples.tobytes()
 
 
-def _spec_cache_key(spec: dict, sample_rate: int):
-    """spec → 결정론적 튜플 키. dict 순서 무관하게 선정된 필드만 사용."""
+def _spec_cache_key(spec: dict, sample_rate: int, volume: int = 100):
+    """spec → 결정론적 튜플 키. dict 순서 무관하게 선정된 필드만 사용.
+
+    Phase 6: _ENGINE_VERSION + volume 포함. 어택/게인/LPF 도입 전 캐시 자동 분리 +
+    사용자 볼륨 변경 시 새 캐시 생성. noiseLpfHz 포함으로 같은 spec이 다른 LPF면
+    다른 캐시 엔트리.
+    """
     return (
         "spec",
+        _ENGINE_VERSION,
         spec.get("waveform", "sine"),
         int(round(float(spec.get("freq", 440)))),
         int(round(float(spec.get("endFreq", spec.get("freq", 440))))),
         int(spec.get("durationMs", 50)),
         spec.get("envelope"),
         float(spec.get("amp", 1.0)),
+        float(spec.get("noiseLpfHz", 1200)),
         int(sample_rate),
+        int(volume),
     )
 
 
-def render_spec(spec: dict, sample_rate: int = SAMPLE_RATE) -> str:
+def render_spec(spec: dict, sample_rate: int = SAMPLE_RATE, volume: int = 100) -> str:
     """synthSpec 렌더링 + 파일 캐시. 반환은 wav 파일 경로.
 
     `render_wav(waveform, freq, duration)`의 풀 기능 버전. synthSpecs 기반
     프리셋(drum_kit/lazer_pack/eight_bit_jump 등)에서 사용.
     """
-    key = _spec_cache_key(spec, sample_rate)
+    key = _spec_cache_key(spec, sample_rate, volume)
 
     with _cache_lock:
         if key in _cache:
             return _cache[key]
 
     path = _cache_path(key)
-    pcm = _render_spec_pcm(spec, sample_rate)
+    pcm = _render_spec_pcm(spec, sample_rate, volume)
     _write_wav_file(pcm, path, sample_rate)
 
     with _cache_lock:

@@ -264,18 +264,21 @@ PRESETS = {
              "durationMs": 80, "envelope": "exp_decay"},
             {"kind": "snare", "waveform": "noise", "freq": 0,
              "durationMs": 100, "envelope": "exp_decay"},
+            # Phase 6 §3: hihat/cymbal은 고역 유지용 noiseLpfHz를 명시해
+            # TR-808 HPF 특성 근사. clap은 기본 1200Hz.
             {"kind": "hihat_closed", "waveform": "noise", "freq": 0,
-             "durationMs": 30, "envelope": "exp_decay"},
+             "durationMs": 30, "envelope": "exp_decay", "noiseLpfHz": 4000},
             {"kind": "hihat_open", "waveform": "noise", "freq": 0,
-             "durationMs": 120, "envelope": "exp_decay"},
+             "durationMs": 120, "envelope": "exp_decay", "noiseLpfHz": 3000},
             {"kind": "clap", "waveform": "noise", "freq": 0,
              "durationMs": 60, "envelope": "exp_decay"},
             {"kind": "tom_low", "waveform": "sine", "freq": 120, "endFreq": 80,
              "durationMs": 120, "envelope": "exp_decay"},
             {"kind": "tom_high", "waveform": "sine", "freq": 220, "endFreq": 160,
              "durationMs": 100, "envelope": "exp_decay"},
+            # Phase 6: cymbal pluck 200ms 꼬리가 과하다 판단 → exp_decay. HPF 5kHz.
             {"kind": "cymbal", "waveform": "noise", "freq": 0,
-             "durationMs": 200, "envelope": "pluck"},
+             "durationMs": 200, "envelope": "exp_decay", "noiseLpfHz": 5000},
         ],
         "durationMs": 80,
         "gapMs": 60,
@@ -388,14 +391,15 @@ PRESETS = {
         "id": "daily_life",
         "nameLabel": "Daily Life",
         "type": "atonal",
-        "slotCount": 24,
-        "recommendedMaxApps": 24,
+        # Phase 6 §9: 24 → 12로 축소. L/X 12개(phone_ring/thunder/cat_meow/dog_bark/
+        # crow_caw/chicken/cough/sneeze/yawn/clap_double/camera_shutter/desk_bell) 제거.
+        # 단일 synthSpec 구조로 재현 불가한 슬롯 정리.
+        "slotCount": 12,
+        "recommendedMaxApps": 12,
         "optIn": False,
-        "previewSlots": (0, 5),  # phone_ring → clap
-        "descriptionLabel": "전화벨/초인종/박수/시계/새/동물 등 일상 소리 24종(만화풍 합성). 권장 ≤24앱.",
+        "previewSlots": (0, 3),  # doorbell → clap
+        "descriptionLabel": "초인종/노크/박수/휘파람/시계/물방울/종/새/뻐꾸기 등 일상 소리 12종(만화풍 근사). 권장 ≤12앱.",
         "synthSpecs": [
-            {"kind": "phone_ring", "waveform": "pulse50",
-             "freq": 500, "durationMs": 180, "envelope": "pluck"},
             {"kind": "doorbell", "waveform": "sine",
              "freq": 660, "endFreq": 523, "durationMs": 220, "envelope": "pluck"},
             {"kind": "knock", "waveform": "noise",
@@ -404,44 +408,25 @@ PRESETS = {
              "freq": 0, "durationMs": 80, "envelope": "exp_decay", "amp": 0.9},
             {"kind": "clap", "waveform": "noise",
              "freq": 0, "durationMs": 20, "envelope": "exp_decay"},
-            {"kind": "clap_double", "waveform": "noise",
-             "freq": 0, "durationMs": 50, "envelope": "exp_decay"},
             {"kind": "whistle", "waveform": "sine",
              "freq": 1200, "endFreq": 1800, "durationMs": 180, "envelope": "pluck"},
-            {"kind": "cough", "waveform": "noise",
-             "freq": 0, "durationMs": 90, "envelope": "pluck"},
-            {"kind": "sneeze", "waveform": "noise",
-             "freq": 0, "durationMs": 110, "envelope": "exp_decay"},
-            {"kind": "yawn", "waveform": "sine",
-             "freq": 300, "endFreq": 200, "durationMs": 260, "envelope": "pluck"},
             {"kind": "clock_tick", "waveform": "sine",
              "freq": 2000, "durationMs": 15, "envelope": "exp_decay"},
             {"kind": "alarm_beep", "waveform": "square",
              "freq": 1000, "durationMs": 80, "envelope": "pluck"},
-            {"kind": "camera_shutter", "waveform": "noise",
-             "freq": 0, "durationMs": 45, "envelope": "exp_decay"},
             {"kind": "water_drop", "waveform": "sine",
              "freq": 400, "endFreq": 1200, "durationMs": 30, "envelope": "pluck"},
-            {"kind": "desk_bell", "waveform": "sine",
-             "freq": 900, "durationMs": 180, "envelope": "pluck"},
             {"kind": "ship_horn", "waveform": "saw",
              "freq": 200, "durationMs": 280, "envelope": "pluck"},
-            {"kind": "cat_meow", "waveform": "sine",
-             "freq": 600, "endFreq": 900, "durationMs": 180, "envelope": "pluck"},
-            {"kind": "dog_bark", "waveform": "square",
-             "freq": 150, "durationMs": 80, "envelope": "exp_decay"},
             {"kind": "bird_chirp", "waveform": "sine",
-             "freq": 2500, "endFreq": 3000, "durationMs": 80, "envelope": "pluck"},
+             # Phase 6 §7: endFreq 3000 → 2400. freq 상한 3500Hz 준수.
+             "freq": 2500, "endFreq": 2400, "durationMs": 80, "envelope": "pluck"},
             {"kind": "cuckoo", "waveform": "sine",
              "freq": 880, "endFreq": 698, "durationMs": 220, "envelope": "pluck"},
-            {"kind": "crow_caw", "waveform": "saw",
-             "freq": 300, "durationMs": 180, "envelope": "exp_decay"},
-            {"kind": "chicken", "waveform": "square",
-             "freq": 400, "durationMs": 140, "envelope": "pluck"},
             {"kind": "cricket", "waveform": "sine",
-             "freq": 5000, "durationMs": 50, "envelope": "exp_decay"},
-            {"kind": "thunder", "waveform": "noise",
-             "freq": 0, "durationMs": 200, "envelope": "exp_decay", "amp": 0.9},
+             # Phase 6 §7: freq 5000 → 3500, duration 50 → 70. freq 상한 준수 + 더
+             # 자연스러운 tail 길이.
+             "freq": 3500, "durationMs": 70, "envelope": "exp_decay"},
         ],
         "durationMs": 100,
         "gapMs": 80,
@@ -453,35 +438,22 @@ PRESETS = {
         "id": "humor_pack",
         "nameLabel": "Humor Pack",
         "type": "atonal",
-        "slotCount": 16,
-        "recommendedMaxApps": 16,
+        # Phase 6 §9: 16 → 8로 축소. fart_long/fart_wobble/burp_long/sneeze_loud/
+        # cough_loud/snore/tongue_cluck/kiss 제거(fart류 변형 중복 + 생리음 재현
+        # 구조적 불가). fart_short만 대표로 유지.
+        "slotCount": 8,
+        "recommendedMaxApps": 8,
         # 기본 라인업 불포함의 의미. 설정 UI에 "(옵트인)" 접미사 + 선택 시 1회성 경고.
         "optIn": True,
-        "previewSlots": (0, 3),  # fart_short → burp_short
-        "descriptionLabel": "방귀/트림/딸꾹질 등 유머 소리 16종(만화풍). 공공장소 비권장. 권장 ≤16앱.",
+        "previewSlots": (0, 3),  # fart_short → boing_fall
+        "descriptionLabel": "방귀/트림/딸꾹질 + 만화 SFX(boing/슬라이드/slip) 8종. 공공장소 비권장. 권장 ≤8앱.",
         "synthSpecs": [
             {"kind": "fart_short", "waveform": "saw",
              "freq": 100, "endFreq": 60, "durationMs": 90, "envelope": "pluck"},
-            {"kind": "fart_long", "waveform": "saw",
-             "freq": 80, "endFreq": 50, "durationMs": 200, "envelope": "pluck"},
-            {"kind": "fart_wobble", "waveform": "saw",
-             "freq": 80, "durationMs": 180, "envelope": "boing"},
             {"kind": "burp_short", "waveform": "square",
              "freq": 200, "durationMs": 70, "envelope": "pluck"},
-            {"kind": "burp_long", "waveform": "square",
-             "freq": 150, "durationMs": 180, "envelope": "pluck"},
             {"kind": "hiccup", "waveform": "square",
              "freq": 400, "endFreq": 600, "durationMs": 50, "envelope": "pluck"},
-            {"kind": "sneeze_loud", "waveform": "noise",
-             "freq": 0, "durationMs": 130, "envelope": "exp_decay"},
-            {"kind": "cough_loud", "waveform": "noise",
-             "freq": 0, "durationMs": 160, "envelope": "exp_decay"},
-            {"kind": "snore", "waveform": "saw",
-             "freq": 120, "durationMs": 280, "envelope": "pluck"},
-            {"kind": "tongue_cluck", "waveform": "noise",
-             "freq": 0, "durationMs": 25, "envelope": "exp_decay"},
-            {"kind": "kiss", "waveform": "sine",
-             "freq": 2000, "durationMs": 40, "envelope": "exp_decay"},
             {"kind": "boing_fall", "waveform": "saw",
              "freq": 800, "endFreq": 200, "durationMs": 220, "envelope": "boing"},
             {"kind": "slide_whistle_up", "waveform": "sine",
@@ -490,8 +462,9 @@ PRESETS = {
              "freq": 1200, "endFreq": 400, "durationMs": 200, "envelope": "pluck"},
             {"kind": "laugh_ha", "waveform": "square",
              "freq": 400, "endFreq": 300, "durationMs": 120, "envelope": "pluck"},
+            # Phase 6 §7: startFreq 2000 → 1400. freq 상한 3500Hz는 자동 통과.
             {"kind": "cartoon_slip", "waveform": "saw",
-             "freq": 2000, "endFreq": 200, "durationMs": 280, "envelope": "pluck"},
+             "freq": 1400, "endFreq": 200, "durationMs": 280, "envelope": "pluck"},
         ],
         "durationMs": 120,
         "gapMs": 80,
@@ -524,6 +497,18 @@ for _pid, _p in PRESETS.items():
         assert len(_specs) == _p["slotCount"], (
             f"preset {_pid!r} synthSpecs len={len(_specs)} != slotCount={_p['slotCount']}"
         )
+        # Phase 6 §7: 청각 피로/TTS 대역 침범 방지용 freq 상한.
+        # daily_life.cricket(5000→3500), daily_life.bird_chirp(endFreq 3000→2400),
+        # humor_pack.cartoon_slip(2000→1400), humor_pack.kiss(제거) 등이 이 상한
+        # 만족하도록 §9 축소와 동시에 교정됨.
+        _MAX_SPEC_FREQ = 3500
+        for _s in _specs:
+            for _k in ("freq", "endFreq"):
+                if _k in _s and _s[_k] > _MAX_SPEC_FREQ:
+                    assert False, (
+                        f"preset {_pid!r} slot {_s.get('kind')!r} {_k}={_s[_k]} "
+                        f"> {_MAX_SPEC_FREQ} (Phase 6 §7 freq 상한)"
+                    )
         # synthSpec 슬롯은 "짧은 SFX 한 덩이"라 옥타브 개념이 없다. matcher의
         # 옥타브 변주(±7 clip)는 tonal/hybrid의 freqs 기반에서만 의미를 가지므로,
         # synthSpecs 프리셋은 반드시 octaveVariation=False여야 한다. 오타 방어.

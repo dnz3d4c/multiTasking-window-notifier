@@ -60,16 +60,24 @@ def _get_active_preset() -> dict:
     return preset
 
 
-def _play_via_synth(freq: int, duration: int, waveform: str) -> None:
+def _resolve_volume(volume):
+    """volume=None이면 현재 설정 조회. 명시된 값이면 그대로 사용(미리듣기 override)."""
+    if volume is None:
+        try:
+            return int(settings.get("beepVolume"))
+        except Exception:
+            return 100
+    return int(volume)
+
+
+def _play_via_synth(freq: int, duration: int, waveform: str, volume=None) -> None:
     """synthEngine으로 wav 파일 생성 후 nvwave로 비동기 재생. 실패 시 tones.beep 폴백.
 
     호출 경로: Phase 3 이후 프리셋 메타에 `waveform` 키가 있을 때만 진입.
     기존 classic/pentatonic/fifths(waveform 메타 없음)는 tones.beep 경로.
 
-    **중요**: `nvwave.playWaveFile`은 파일 경로 문자열만 받는다
-    (`NVDA/source/nvwave.py:82-155`의 `os.path.basename(fileName)`). 따라서
-    `synthEngine.render_wav()`는 BytesIO가 아닌 **파일 경로**를 반환하도록 구현됨.
-    같은 (waveform, freq, duration) 조합이면 동일 경로라 디스크 I/O는 첫 호출만.
+    Phase 6: `volume` (50~150%) 인자 도입. None이면 `settings.beepVolume` 조회.
+    미리듣기는 슬라이더 현재값을 override로 전달해 저장 전 즉시 체감.
 
     폴백 정책 (절대 침묵 금지):
         - synthEngine import 실패(모듈 누락 등): tones.beep(freq) 단순 재생
@@ -84,7 +92,8 @@ def _play_via_synth(freq: int, duration: int, waveform: str) -> None:
         tones.beep(freq, duration)
         return
     try:
-        wav_path = synthEngine.render_wav(waveform, freq, duration)
+        vol = _resolve_volume(volume)
+        wav_path = synthEngine.render_wav(waveform, freq, duration, volume=vol)
         # asynchronous=True — event_gainFocus 블로킹 방지. NVDA 내부는
         # 다음 호출이 이 재생을 stop()으로 인터럽트(단일 player 구조).
         nvwave.playWaveFile(wav_path, asynchronous=True)
@@ -96,19 +105,22 @@ def _play_via_synth(freq: int, duration: int, waveform: str) -> None:
         tones.beep(freq, duration)
 
 
-def _play_one_beep(freq: int, duration: int, waveform) -> None:
-    """단음 재생. waveform이 None이면 tones.beep, 그 외는 synthEngine+nvwave."""
+def _play_one_beep(freq: int, duration: int, waveform, volume=None) -> None:
+    """단음 재생. waveform이 None이면 tones.beep(volume 무시), 그 외는 nvwave."""
     if waveform is None:
+        # classic 계열은 NVDA tones.beep 내부 볼륨 체계를 따른다. beepVolume 슬라이더
+        # 영향 받지 않음 (Phase 6 설계 결정 — settings.py CONFSPEC 주석 참조).
         tones.beep(freq, duration)
     else:
-        _play_via_synth(freq, duration, waveform)
+        _play_via_synth(freq, duration, waveform, volume=volume)
 
 
-def _play_spec(spec: dict) -> None:
+def _play_spec(spec: dict, volume=None) -> None:
     """Phase 4 synthSpec 재생. synthEngine.render_spec + nvwave + tones 폴백.
 
     spec의 durationMs/freq를 사용 — 사용자 settings 값은 무시(프리셋이 슬롯별로
     자체 duration을 정의). 폴백 시엔 spec.freq + spec.durationMs로 tones.beep.
+    Phase 6: volume(50~150%) 인자 도입.
     """
     try:
         from . import synthEngine
@@ -122,7 +134,8 @@ def _play_spec(spec: dict) -> None:
         tones.beep(fallback_freq, int(spec.get("durationMs", 50)))
         return
     try:
-        wav_path = synthEngine.render_spec(spec)
+        vol = _resolve_volume(volume)
+        wav_path = synthEngine.render_spec(spec, volume=vol)
         nvwave.playWaveFile(wav_path, asynchronous=True)
     except Exception:
         log.exception(
@@ -136,17 +149,17 @@ def _play_spec(spec: dict) -> None:
         tones.beep(fallback_freq, int(spec.get("durationMs", 50)))
 
 
-def _schedule_second_spec(spec: dict, gap_ms: int) -> None:
+def _schedule_second_spec(spec: dict, gap_ms: int, volume=None) -> None:
     """gap_ms 뒤에 _play_spec 예약. _schedule_second_beep의 spec 버전."""
     try:
         import core
-        core.callLater(gap_ms, _play_spec, spec)
+        core.callLater(gap_ms, _play_spec, spec, volume)
     except Exception:
         log.exception("mtwn: second spec scheduling failed")
 
 
 def _schedule_second_beep(
-    freq: int, duration: int, gap_ms: int, waveform=None
+    freq: int, duration: int, gap_ms: int, waveform=None, volume=None
 ) -> None:
     """gap_ms 뒤에 단음 재생을 예약.
 
@@ -162,7 +175,7 @@ def _schedule_second_beep(
     """
     try:
         import core
-        core.callLater(gap_ms, _play_one_beep, freq, duration, waveform)
+        core.callLater(gap_ms, _play_one_beep, freq, duration, waveform, volume)
     except Exception:
         log.exception("mtwn: second beep scheduling failed")
 
@@ -243,18 +256,20 @@ def play_beep(
     _schedule_second_beep(b_freq, duration, gap_ms, waveform)
 
 
-def play_preview(preset_id: str, duration: int, gap_ms: int) -> None:
+def play_preview(preset_id: str, duration: int, gap_ms: int, volume=None) -> None:
     """설정 패널 "미리듣기(&P)" 버튼이 호출. 프리셋의 previewSlots 2음 재생.
 
     Args:
         preset_id: PRESETS의 key. 미지 id면 classic 폴백 + 1회 경고.
         duration: 각 음 지속 시간(ms). 보통 settings["beepDuration"].
         gap_ms: 두 음 간격(ms). 보통 settings["beepGapMs"].
+        volume: Phase 6 beepVolume(50~150%). None이면 settings 조회. 설정 패널
+            슬라이더 현재값을 override로 전달해 저장 전 즉시 체감 가능.
 
-    미리듣기는 실제 재생과 같은 경로(`tones.beep` + `core.callLater`)를 써서
-    사용자가 실 사용 시의 소리를 그대로 듣게 한다. 미리듣기 vs 실제 매칭 경합
-    정책은 Phase 3에서 `_pending_callback.Stop()` 기반으로 강화 예정. Phase 1에선
-    NVDA `core.callLater`의 기본 동작(이전 콜백 대체 없음)에 의존.
+    미리듣기는 실제 재생과 같은 경로를 써서 사용자가 실 사용 시의 소리를 그대로
+    듣게 한다. 미리듣기 vs 실제 매칭 경합 정책은 Phase 3에서 `_pending_callback.
+    Stop()` 기반으로 강화 예정. Phase 1에선 NVDA `core.callLater`의 기본 동작
+    (이전 콜백 대체 없음)에 의존.
     """
     preset = PRESETS.get(preset_id)
     if preset is None:
@@ -275,12 +290,12 @@ def play_preview(preset_id: str, duration: int, gap_ms: int) -> None:
 
     synth_specs = preset.get("synthSpecs")
     if synth_specs is not None:
-        # synthSpecs 프리셋 미리듣기 — 슬롯 spec 그대로 재생. gap은 인자 사용.
-        _play_spec(synth_specs[slot_a])
-        _schedule_second_spec(synth_specs[slot_b], gap_ms)
+        # synthSpecs 프리셋 미리듣기 — 슬롯 spec 그대로 재생. gap/volume 인자 사용.
+        _play_spec(synth_specs[slot_a], volume=volume)
+        _schedule_second_spec(synth_specs[slot_b], gap_ms, volume=volume)
         return
 
     freqs = preset["freqs"]
     waveform = preset.get("waveform")
-    _play_one_beep(freqs[slot_a], duration, waveform)
-    _schedule_second_beep(freqs[slot_b], duration, gap_ms, waveform)
+    _play_one_beep(freqs[slot_a], duration, waveform, volume=volume)
+    _schedule_second_beep(freqs[slot_b], duration, gap_ms, waveform, volume=volume)
