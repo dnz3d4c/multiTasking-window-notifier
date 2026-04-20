@@ -369,6 +369,16 @@ DEFAULT_TAB_CLASSES = {
 
 "이후 기능 대비"로 남겨둔 함수(`prune_stale`)가 런타임 호출 0건으로 여러 Phase를 넘겼다. 실제 착수 시점엔 신규 설계 가능성이 높아 오히려 방해가 된다. 공개 API 표면은 "현재 실제로 쓰는 것"과 일치시키고, 과거 구현이 필요하면 git log로 복원한다.
 
+### Mixin에 `@script` 분리 시 `ScriptableType` 메타 필수 (Phase R5 교훈)
+
+`@script(gesture=...)`의 기본 바인딩은 `baseObject.ScriptableType.__new__`가 클래스 body(`namespace`)를 스캔해 `_<ClassName>__gestures` dict를 만드는 경로로만 `_gestureMap`에 등록된다(`NVDA/source/baseObject.py:186-205` + `:223-239`). Mixin을 **기본 `type` 메타클래스로 두면 이 경로를 우회**해 `_gestureMap`이 공란으로 남는다. 설치된 다른 애드온 10여 종 전수 조사 결과 어느 애드온도 Mixin 분리를 쓰지 않고 모두 `GlobalPlugin` body에 `@script`를 직접 선언한다 — 관용의 이면에 이 메타클래스 제약이 있다.
+
+Mixin을 쓰려면 `class FooMixin(metaclass=baseObject.ScriptableType):` 로 명시. 명시하지 않으면:
+- 입력 제스처 대화상자에 기본 단축키가 표시되지 않음(`inputCore._AllGestureMappingsRetriever.addObj`가 `_gestureMap` 순회로 gesture 부착하므로)
+- 신규 설치 환경에선 기본 단축키 자체가 동작하지 않음
+
+**부수 교훈**: "단축키가 동작한다 = 기본 바인딩 경로가 정상"으로 등치하지 말 것. NVDA는 `_gestureMap`과 `globalMapScripts`(`userGestureMap`/`localeGestureMap`) 두 경로를 **독립적으로** 해결한다(`scriptHandler._getObjScript`, `scriptHandler.py:60-104`). 한쪽이 공란이어도 다른 쪽이 살아있으면 실행은 가능 — 실행과 표시는 서로 다른 건강 지표다. 원인 조사 시 "실기 동작"과 "정적 분석"이 모순되면 먼저 **복수 해결 경로 중 다른 쪽이 커버하고 있을 가능성**을 확인.
+
 ## 기능 아이디어
 ### 1. 즉시 실행 기능 ⚡
 - **목적**: Alt+Tab 없이 등록된 창으로 바로 이동

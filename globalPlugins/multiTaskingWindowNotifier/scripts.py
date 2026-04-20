@@ -29,6 +29,16 @@ import speech
 from logHandler import log
 from scriptHandler import script
 
+# ScriptableType은 @script(gesture=)의 기본 바인딩을 수집하는 NVDA 메타클래스.
+# Mixin에 이걸 명시하지 않으면 namespace-only 스캔 경로(baseObject.py:186-205)가
+# Mixin body의 script_* 메서드를 만나지 못해 _gestureMap이 공란으로 남고,
+# 입력 제스처 대화상자에 기본 단축키가 표시되지 않는다. NVDA 외부(단위 테스트 등)
+# 에서 import 실패 시 fallback은 type — 그 상황에선 gesture 바인딩 검증을 하지 않음.
+try:
+    from baseObject import ScriptableType
+except ImportError:
+    ScriptableType = type
+
 from . import store
 from .appIdentity import makeAppKey, normalize_title
 from .constants import MAX_ITEMS, SCOPE_APP, SCOPE_WINDOW
@@ -85,12 +95,20 @@ def _prompt_for_alias(current_alias: str = "") -> str | None:
         gui.mainFrame.postPopup()
 
 
-class ScriptsMixin:
+class ScriptsMixin(metaclass=ScriptableType):
     """GlobalPlugin의 @script 핸들러 + 보조 헬퍼 모음.
 
     scriptCategory를 여기 선언하면 NVDA Input gestures 다이얼로그에서 이 mixin을
     상속한 GlobalPlugin의 모든 @script가 같은 카테고리로 묶인다. 각 @script에
     category 인자를 반복 선언할 필요 없음.
+
+    metaclass=ScriptableType 지정 이유: @script(gesture=) 기본 바인딩은 클래스
+    생성 시점에 namespace를 스캔해 _<ClassName>__gestures dict를 만드는 경로로만
+    _gestureMap에 등록된다. Mixin을 기본 type 메타로 두면 이 경로를 통째로 우회해
+    입력 제스처 대화상자에 기본 단축키가 표시되지 않는다(userGestureMap 수동
+    등록 경로로만 우연히 동작). GlobalPlugin(ScriptsMixin, ...) 상속 트리에서
+    ScriptsMixin 자체가 ScriptableType을 메타클래스로 가지면, __init__의 MRO
+    순회가 _ScriptsMixin__gestures를 찾아 bindGestures로 적용한다.
     """
 
     # Translators: Input gestures 다이얼로그에 표시되는 카테고리 이름
