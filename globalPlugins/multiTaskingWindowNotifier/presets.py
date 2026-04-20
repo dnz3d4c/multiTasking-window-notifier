@@ -281,9 +281,8 @@ def migrate_deprecated_preset(section) -> None:
     dict-like API 제공. 호출은 `__init__.py`의 GlobalPlugin.__init__에서 한 번.
     멱등 — 이미 마이그레이션된 환경에서 재호출해도 no-op.
 
-    부수 정리:
-        - `humorPackWarningShown` 키가 남아있으면 함께 pop. 이 키 자체도 Phase 7.4
-          에서 CONFSPEC에서 제거되며, 사용자 config에 잔존할 수 있어 여기서 청소.
+    `humorPackWarningShown` 같은 obsolete 키 청소는 `settings._OBSOLETE_KEYS`가
+    단일 소유. 여기서는 `beepPreset` 값 치환만 담당해 책임 분리 유지.
     """
     try:
         preset_id = section.get("beepPreset")
@@ -295,12 +294,6 @@ def migrate_deprecated_preset(section) -> None:
                 f"{CLASSIC_PRESET_ID!r} (Phase 7 철회)"
             )
             section["beepPreset"] = CLASSIC_PRESET_ID
-        if "humorPackWarningShown" in section:
-            try:
-                del section["humorPackWarningShown"]
-                log.info("mtwn: purged obsolete config key: humorPackWarningShown")
-            except KeyError:
-                pass
     except Exception:
         # 설정 섹션이 손상됐거나 타입이 예상과 다른 경우에도 플러그인 부팅을
         # 막지 않는다. 최악의 경우 beepPlayer/matcher의 `get_preset_or_classic`

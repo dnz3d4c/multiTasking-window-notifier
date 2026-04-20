@@ -24,20 +24,17 @@ from .constants import ADDON_NAME
 #                      한 덩어리로 뭉쳐 들린다는 피드백 후 재조정.
 # - debugLogging      : event_gainFocus 진단 로그. Ctrl+Tab/오버레이 classname 추적용.
 #                      기본 False. 켜면 NVDA 로그(%APPDATA%\\nvda\\nvda.log)에 한 줄씩 기록.
-# - beepPreset        : 비프 프리셋 id (Phase 1 신설). constants.PRESETS의 key.
-#                      미지 id 지정 시 beepPlayer가 CLASSIC_PRESET_ID로 폴백.
-#                      설치 직후/롤백 시 "classic"으로 현행 소리 그대로 유지.
+# - beepPreset        : 비프 프리셋 id. presets.PRESETS의 key.
+#                      미지/폐기 id 지정 시 presets.migrate_deprecated_preset 또는
+#                      런타임 fallback(get_preset_or_classic)이 classic으로 흡수.
 CONFSPEC = {
     "beepDuration": "integer(default=50, min=20, max=500)",
     "beepGapMs": "integer(default=100, min=0, max=200)",
     "debugLogging": "boolean(default=False)",
     "beepPreset": 'string(default="classic")',
-    # Phase 5: humor_pack 프리셋 첫 선택 시 1회성 공공장소 주의 경고를 띄우기
-    # 위한 플래그. 경고 표시 후 True로 갱신해 재선택 시 조용히 넘어간다.
-    "humorPackWarningShown": "boolean(default=False)",
-    # Phase 6: nvwave 경로(Hybrid/Percussive/Atonal 프리셋) 볼륨 슬라이더.
-    # 50~150% 범위로 clipping 위험 최소화. classic(tones.beep)은 NVDA 내부
-    # 볼륨 체계를 따르므로 영향 없음.
+    # Phase 6: nvwave 경로(hybrid 프리셋) 볼륨 슬라이더. 50~150% 범위로 clipping
+    # 위험 최소화. classic/pentatonic/fifths(tones.beep 경로)는 NVDA 내부 볼륨
+    # 체계를 따르므로 영향 없음.
     "beepVolume": "integer(default=100, min=50, max=150)",
 }
 
@@ -48,8 +45,14 @@ CONFSPEC = {
 #                          MAX_ITEMS(128) 디커플 + 비프 변별이 BEEP_TABLE 안에서
 #                          끝나서 사용자가 줄일 실용 이유 없음. MAX_ITEMS 상수만으로
 #                          하드 상한 충분.
+# - humorPackWarningShown: humor_pack 옵트인 프리셋 1회성 경고 플래그. Phase 7.4
+#                          에서 humor_pack 자체가 철회되며 의미 소멸. 사용자
+#                          config에 잔존할 수 있어 여기서 정리.
+#                          (presets.migrate_deprecated_preset도 중복 정리.)
 # register()에서 1회성으로 nvda.ini 잔재를 정리한다(다음 NVDA 종료 시 디스크 반영).
-_OBSOLETE_KEYS = ("beepVolumeLeft", "beepVolumeRight", "maxItems")
+_OBSOLETE_KEYS = (
+    "beepVolumeLeft", "beepVolumeRight", "maxItems", "humorPackWarningShown",
+)
 
 
 # 스펙 타입 → 파이썬 변환기. CONFSPEC에서 새 타입을 도입하면 여기도 확장.
