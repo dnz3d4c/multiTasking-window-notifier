@@ -295,21 +295,3 @@ def render_wav(
                 pass
         _cache[key] = path
     return path
-
-
-def clear_cache() -> None:
-    """전체 캐시 제거 + 파일 unlink 시도. GlobalPlugin.terminate() 호출점."""
-    with _cache_lock:
-        paths = list(_cache.values())
-        _cache.clear()
-    for p in paths:
-        try:
-            os.unlink(p)
-        except Exception:
-            pass
-
-
-def cache_size() -> int:
-    """진단용 — 현재 캐시 엔트리 수."""
-    with _cache_lock:
-        return len(_cache)

@@ -171,7 +171,7 @@ multiTaskingWindowNotifier/
     └── multiTaskingWindowNotifier/
         ├── __init__.py                    # GlobalPlugin + 이벤트 훅 진입점 (+ ScriptsMixin 결합). 부팅 시 presets.migrate_deprecated_preset 호출
         ├── constants.py                   # ADDON_NAME, MAX_ITEMS(128), BEEP_TABLE(C major 온음계 35음), BEEP_TABLE_SIZE(35), SCOPE_*, ALT_TAB_*, FLUSH_*
-        ├── presets.py                     # 프리셋 데이터 단일 소유자 (PRESETS 8종, freqs 빌더, 부팅 assert, get_preset_or_classic, migrate_deprecated_preset) - Phase 7.1 신설
+        ├── presets.py                     # 프리셋 데이터 단일 소유자 (PRESETS 5종, freqs 빌더, 부팅 assert, get_preset_or_classic, migrate_deprecated_preset) - Phase 7.1 신설
         ├── appIdentity.py                 # 앱 식별/복합키 + normalize_title
         ├── store/                         # v7 JSON 저장소 서브패키지 (Phase 3 분해)
         │   ├── __init__.py                # 공개 API 재export (load/save/record_switch/flush/…)

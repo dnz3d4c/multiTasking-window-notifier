@@ -60,10 +60,6 @@ def _format_preset_label(preset: dict) -> str:
 
     포맷: "[카테고리] 이름 — N slots"
     이모지 사용 안 함 — NVDA TTS 엔진별로 이모지 처리가 다르고 소음 유발.
-
-    Phase 7.4에서 옵트인 프리셋(humor_pack)이 철회되며 " (옵트인)" 접미사 경로
-    제거. optIn 플래그는 dict에 잔존하지만 현재 모든 프리셋이 False이며, 향후
-    재도입 시 본 함수와 onSave를 함께 복원해야 한다.
     """
     category = _TYPE_CATEGORY_LABELS.get(preset["type"], preset["type"])
     name = _(preset["nameLabel"])

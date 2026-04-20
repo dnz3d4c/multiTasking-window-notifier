@@ -11,27 +11,25 @@
     - 프리셋 데이터 소유자는 이 모듈뿐. 다른 모듈은 공개 API만 호출.
     - 의존 방향: presets.py → constants.py 만 허용. settings/beepPlayer/
       synthEngine을 import하지 않는다(역전 금지).
-    - 공개 API: PRESETS, CLASSIC_PRESET_ID, get_preset, get_preset_or_classic,
-      is_deprecated, migrate_deprecated_preset.
+    - 공개 API: PRESETS, CLASSIC_PRESET_ID, get_preset_or_classic,
+      migrate_deprecated_preset.
 
 프리셋 dict 포맷:
     id                  — 내부 식별자(settings.beepPreset에 저장)
     nameLabel           — UI 노출 이름 (raw str; UI 레이어가 _() 번역)
     type                — "tonal" | "hybrid"
     slotCount           — 슬롯 수. 재생 시점 effective_idx = stored_idx % slotCount
-    recommendedMaxApps  — 이 프리셋에서 변별 가능한 앱 수 (UI 경고 기준)
-    optIn               — True면 기본 라인업 불포함 (현재 모든 프리셋 False)
     previewSlots        — "미리듣기(&P)" 버튼이 재생할 대표 슬롯 인덱스 2개
     descriptionLabel    — ListBox focus 시 표시되는 짧은 설명 (raw str)
     freqs               — slotCount 길이의 정수 주파수(Hz) 리스트
     durationMs / gapMs  — 2음 순차 재생의 각 음 길이/간격
     suppressRepeat      — 최근 0.3초 내 같은 키 재매칭 시 tab음 생략
     octaveVariation     — 같은 앱 재진입 시 tab idx ±7 clip
-    gain                — 재생 음량 계수 (nvwave 경로에서 적용)
     waveform            — (hybrid 전용) nvwave+synthEngine.render_wav 경로 진입 트리거
 
 Phase 7.1에서 철회된 프리셋(drum_kit/lazer_pack/eight_bit_jump/daily_life/
-humor_pack)은 이 모듈에 존재하지 않는다. 사용자 저장값에 그 id가 남아있어도
+humor_pack) + Phase 8에서 철회된 프리셋(arcade_pop/coin_dash/glass_step)은
+이 모듈에 존재하지 않는다. 사용자 저장값에 그 id가 남아있어도
 `migrate_deprecated_preset`이 silent write로 CLASSIC_PRESET_ID로 돌린다.
 """
 
@@ -124,8 +122,6 @@ PRESETS = {
         "nameLabel": "Classic Tones",
         "type": "tonal",
         "slotCount": 35,
-        "recommendedMaxApps": 35,
-        "optIn": False,
         "previewSlots": (0, 14),  # C3, C5
         "descriptionLabel": "C 장조 35음 (도·레·미·파·솔·라·시 × 5옥타브). 현행 기본.",
         "freqs": BEEP_TABLE,  # read-only 공유 참조
@@ -133,15 +129,12 @@ PRESETS = {
         "gapMs": 100,
         "suppressRepeat": False,
         "octaveVariation": False,
-        "gain": 1.0,
     },
     "pentatonic": {
         "id": "pentatonic",
         "nameLabel": "Pentatonic Calm",
         "type": "tonal",
         "slotCount": 35,
-        "recommendedMaxApps": 35,
-        "optIn": False,
         "previewSlots": (5, 20),  # C3, C6
         "descriptionLabel": "5음계(C D E G A) × 7옥타브. 같은 창 빠른 재진입 시 탭음을 생략하고 옥타브 변주로 반복감을 완화.",
         "freqs": _PENTATONIC_FREQS,
@@ -154,15 +147,12 @@ PRESETS = {
         #       "같은 창인데 같은 소리"의 단조로움을 완화. 범위 밖은 clip.
         "suppressRepeat": True,
         "octaveVariation": True,
-        "gain": 1.0,
     },
     "fifths": {
         "id": "fifths",
         "nameLabel": "Fifths Fanfare",
         "type": "tonal",
         "slotCount": 35,
-        "recommendedMaxApps": 35,
-        "optIn": False,
         "previewSlots": (0, 7),  # C3, C4
         "descriptionLabel": "완전5도 진행(C-G-D-A-E-B-F) × 5옥타브. 팡파레 느낌.",
         "freqs": _build_fifths_freqs(),
@@ -170,7 +160,6 @@ PRESETS = {
         "gapMs": 100,
         "suppressRepeat": False,
         "octaveVariation": False,
-        "gain": 1.0,
     },
     # Phase 3 hybrid — nvwave + synthEngine.render_wav 경로. `waveform` 키
     # 존재가 신 경로 진입 트리거. freqs는 BEEP_TABLE(C3~B7)을 공유해 음정 구조를
@@ -183,8 +172,6 @@ PRESETS = {
         "nameLabel": "Soft Retro",
         "type": "hybrid",
         "slotCount": 35,
-        "recommendedMaxApps": 35,
-        "optIn": False,
         "previewSlots": (0, 14),
         "descriptionLabel": "삼각파. 부드럽고 따뜻한 8비트 배경음 느낌.",
         "freqs": BEEP_TABLE,
@@ -193,7 +180,6 @@ PRESETS = {
         "gapMs": 100,
         "suppressRepeat": False,
         "octaveVariation": False,
-        "gain": 1.0,
     },
     # Phase 7.5: 정서축(애조)을 채우는 tonal 신규. classic/pentatonic/fifths가
     # 모두 밝은 장조 또는 중립이라 애조가 비어있었다.
@@ -204,8 +190,6 @@ PRESETS = {
         "nameLabel": "Moss Bell",
         "type": "tonal",
         "slotCount": 35,
-        "recommendedMaxApps": 35,
-        "optIn": False,
         "previewSlots": (0, 14),  # A2, A4
         "descriptionLabel": "A 자연단음계 7음 × 5옥타브. 차분한 애조.",
         "freqs": _A_MINOR_FREQS,
@@ -213,7 +197,6 @@ PRESETS = {
         "gapMs": 100,
         "suppressRepeat": False,
         "octaveVariation": False,
-        "gain": 1.0,
     },
 }
 
@@ -249,15 +232,6 @@ assert CLASSIC_PRESET_ID in PRESETS, "CLASSIC_PRESET_ID fallback target missing"
 _warned_preset_ids: set = set()
 
 
-def get_preset(preset_id: str):
-    """id로 프리셋 dict 조회. 없으면 None.
-
-    폴백이 필요한 호출부는 `get_preset_or_classic`를 쓴다. 이 함수는 None을
-    그대로 반환해 호출부가 "없음"을 능동적으로 처리해야 하는 경우에만.
-    """
-    return PRESETS.get(preset_id)
-
-
 def get_preset_or_classic(preset_id: str) -> dict:
     """id 조회 실패 시 classic 프리셋으로 폴백 + 1회 log.warning.
 
@@ -278,11 +252,6 @@ def get_preset_or_classic(preset_id: str) -> dict:
     return PRESETS[CLASSIC_PRESET_ID]
 
 
-def is_deprecated(preset_id: str) -> bool:
-    """Phase 4~6에서 철회된 프리셋 id 감지. 마이그레이션 진입 판정."""
-    return preset_id in _DEPRECATED_PRESET_IDS
-
-
 def migrate_deprecated_preset(section) -> None:
     """사용자 저장값에 폐기 프리셋 id가 남아있으면 classic으로 silent write.
 
@@ -295,9 +264,9 @@ def migrate_deprecated_preset(section) -> None:
     """
     try:
         preset_id = section.get("beepPreset")
-        # preset_id가 None이면 is_deprecated는 False이지만 타입 계약 위반이므로
-        # 문자열 확인 후 분기.
-        if preset_id and is_deprecated(preset_id):
+        # preset_id가 None(타입 불량/미존재)이면 set 멤버십이 False라 자연스럽게
+        # 분기 스킵. 문자열일 때만 매칭.
+        if preset_id in _DEPRECATED_PRESET_IDS:
             log.warning(
                 f"mtwn: deprecated beepPreset={preset_id!r} migrated to "
                 f"{CLASSIC_PRESET_ID!r}"
@@ -315,8 +284,6 @@ def migrate_deprecated_preset(section) -> None:
 __all__ = (
     "PRESETS",
     "CLASSIC_PRESET_ID",
-    "get_preset",
     "get_preset_or_classic",
-    "is_deprecated",
     "migrate_deprecated_preset",
 )
