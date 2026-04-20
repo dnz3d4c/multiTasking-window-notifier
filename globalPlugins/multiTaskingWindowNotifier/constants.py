@@ -161,13 +161,17 @@ PRESETS = {
         "recommendedMaxApps": 35,
         "optIn": False,
         "previewSlots": (5, 20),  # C3, C6
-        "descriptionLabel": "5음계(C D E G A) × 7옥타브. 부드럽고 자자한 느낌.",
+        "descriptionLabel": "5음계(C D E G A) × 7옥타브. 같은 창 빠른 재진입 시 탭음을 생략하고 옥타브 변주로 반복감을 완화.",
         "freqs": _PENTATONIC_FREQS,
         "durationMs": 50,
         "gapMs": 100,
-        # suppressRepeat/octaveVariation은 Phase 2에서 True로 전환 예정.
-        "suppressRepeat": False,
-        "octaveVariation": False,
+        # Phase 2: "Calm" 캐릭터를 살리는 두 기능을 기본 on.
+        #   suppressRepeat — 같은 매칭 키가 _SUPPRESS_REPEAT_SEC(0.3s) 내로 다시 오면
+        #       탭음 생략(앱음만). Alt+Tab 연타/NVDA 이벤트 근접 재발화 시 피로 감소.
+        #   octaveVariation — 같은 key 재진입마다 탭 idx를 ±7(=1옥타브) 토글해
+        #       "같은 창인데 같은 소리"의 단조로움을 완화. 범위 밖은 clip.
+        "suppressRepeat": True,
+        "octaveVariation": True,
         "gain": 1.0,
     },
     "fifths": {

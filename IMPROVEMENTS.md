@@ -298,15 +298,37 @@ NVDA 소스(`ext/nvda/source/`)와 프로젝트 소스를 교차 탐색해 "NVDA
 
 **차기**: Phase 2(반복 억제 + 옥타브 변주 플래그), Phase 3(합성 엔진 + 파형 다양화 + slotCount 가변 인프라), Phase 4(synthSpecs 타악/SFX), Phase 5(Daily Life + Humor Pack 옵트인).
 
+### 비프 프리셋 확장 시리즈 Phase 2 (완료)
+
+**반복 억제 + 옥타브 변주**를 프리셋별 플래그로 도입. Pentatonic Calm 기본 on, 그 외 현행 동작 유지.
+
+**변경**:
+- `constants.py`: `pentatonic` 프리셋의 `suppressRepeat`/`octaveVariation` 기본값 True. descriptionLabel 보강("같은 창 빠른 재진입 시 탭음 생략 + 옥타브 변주로 반복감 완화").
+- `matcher.py`: `Matcher` 클래스에 `_last_matched_key` / `_last_match_time` / `_octave_toggle` 인스턴스 상태 추가. `match_and_beep` 끝부분에 로직 삽입.
+  - **반복 억제**: `is_repeat + scope=SCOPE_WINDOW + tab_idx≠None + suppressRepeat + now - last_time < _SUPPRESS_REPEAT_SEC(0.3s)` → `tab_idx=None`(단음).
+  - **옥타브 변주**: `is_repeat + scope=SCOPE_WINDOW + tab_idx≠None + octaveVariation` → `_octave_toggle ^= 1` 후 `shift=±7` 적용, 범위 밖은 `[0, slotCount-1]`로 clip(Phase 3에서 modulo wrap 예정).
+  - `_active_preset()` 헬퍼: `settings.get("beepPreset")` + `PRESETS.get()` 조회 + classic 폴백.
+  - 비매칭 이벤트에서 `_last_matched_key`는 의도적으로 리셋 안 함("미스 창 경유 후 빠른 복귀"도 반복으로 간주). 주석으로 명시.
+  - `time.monotonic()` 사용(시계 조정 무관).
+
+**분리된 계층**:
+- 기존 `last_event_sig`(NVDA 이벤트 중복 흡수용, tab_sig 포함) — **일체 변경 없음**. 완전 독립 레이어로 공존.
+- 반복 억제/옥타브 변주 — 사용자 행동(같은 창 재진입) 기반. 스킵이 아니라 "tab음만 생략" 또는 "변주 적용"이라 sig_guard와 중복 아님.
+
+**검증**:
+- NVDA Addon Development Specialist 리뷰 통과("반드시 수정" 0건, 제안 2건 반영: slotCount 직접 참조로 단순화 + 리셋 정책 주석 보강).
+- 빌드: `multiTaskingWindowNotifier-0.9-dev.nvda-addon` 22 files 66.7 KB 성공.
+- 기존 테스트는 기본 프리셋(classic, 두 플래그 False)에서 돌아가 회귀 없음.
+
+**차기**: Phase 3(합성 엔진 + 파형 다양화 + slotCount 가변 인프라), Phase 4(synthSpecs 타악/SFX), Phase 5(Daily Life + Humor Pack 옵트인).
+
 ---
 
 ## 현재 로드맵
 
-### 비프 프리셋 확장 시리즈 (Phase 2~5, 진행 중)
+### 비프 프리셋 확장 시리즈 (Phase 3~5, 진행 중)
 
 상세 플랜: `C:\Users\advck\.claude\plans\gleaming-drifting-dragonfly.md`.
-
-- **Phase 2** — 프리셋별 `suppressRepeat`/`octaveVariation` 플래그 + matcher 최근 매칭 캐시. Pentatonic Calm 기본 on.
 - **Phase 3** — `nvwave` + PCM 합성 도입. `synthEngine.py` 순수 함수 모듈 신설. `WAVEFORMS` 라이브러리(sine/square/triangle/pulse25/pulse12/saw/noise + portamento/fm_wobble/vibrato + exp_decay/pluck/boing 엔벨로프). Hybrid 프리셋 3개 추가(Arcade Pop / Coin Dash / Soft Retro). `BEEP_TABLE_SIZE` 상수 제거, 할당 공간 `MAX_ITEMS=128` 고정 + 재생 시점 modulo wrap. **착수 전 사전 실측 게이트 필수**.
 - **Phase 4** — `synthSpecs` 스키마 도입. Percussive/Atonal 프리셋 3개(Drum Kit 8슬롯 / Lazer Pack 16슬롯 / 8-Bit Jump 20슬롯).
 - **Phase 5** — 일상 소리 프리셋(Daily Life 24슬롯) + 옵트인 Humor Pack(16슬롯, 1회성 경고). 방귀/트림/딸꾹질 등은 만화풍 PCM 합성으로만 구현.
