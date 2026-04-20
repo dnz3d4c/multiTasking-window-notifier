@@ -25,7 +25,8 @@ import tones
 from logHandler import log
 
 from . import settings
-from .constants import CLASSIC_PRESET_ID, PRESETS, SCOPE_APP, SCOPE_WINDOW
+from .constants import SCOPE_APP, SCOPE_WINDOW
+from .presets import CLASSIC_PRESET_ID, PRESETS
 
 # synthEngine / nvwave는 지연 import로 감쌈. NVDA 외 환경(단위 테스트)에서는
 # nvwave가 없어도 tones.beep 경로만 타면 import 없이 동작. 지연 import 실패는

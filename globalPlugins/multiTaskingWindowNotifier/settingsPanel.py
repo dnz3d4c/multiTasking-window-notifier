@@ -24,7 +24,8 @@ from gui import guiHelper
 from gui.settingsDialogs import SettingsPanel
 
 from . import beepPlayer, settings
-from .constants import ADDON_NAME, CLASSIC_PRESET_ID, PRESETS
+from .constants import ADDON_NAME
+from .presets import CLASSIC_PRESET_ID, PRESETS
 
 # 번역 초기화(선택). NVDA 외 환경(유닛 테스트 등)에서 _를 정의해두는 폴백.
 try:

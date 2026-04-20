@@ -15,6 +15,8 @@ from logHandler import log
 
 from . import store
 from . import settings
+from . import presets
+from .constants import ADDON_NAME
 from .windowInfo import config_addon_dir
 from .settingsPanel import MultiTaskingSettingsPanel
 from .switchFlusher import FlushScheduler
@@ -50,6 +52,15 @@ class GlobalPlugin(ScriptsMixin, globalPluginHandler.GlobalPlugin):
         # in 체크로 재로드 시 고아 엔트리로 인한 중복 등록도 방어.
         try:
             settings.register()
+            # Phase 7: 사용자 저장값에 철회된 프리셋 id(drum_kit/lazer_pack/
+            # eight_bit_jump/daily_life/humor_pack)가 남아있으면 classic으로
+            # silent 전환. humorPackWarningShown 잔재 키도 함께 청소. 멱등.
+            # settings.register()가 섹션을 이미 보장했으므로 그 뒤에 호출.
+            try:
+                import config
+                presets.migrate_deprecated_preset(config.conf[ADDON_NAME])
+            except Exception:
+                log.exception("mtwn: deprecated preset migration failed")
             category_classes = gui.settingsDialogs.NVDASettingsDialog.categoryClasses
             if MultiTaskingSettingsPanel not in category_classes:
                 category_classes.append(MultiTaskingSettingsPanel)

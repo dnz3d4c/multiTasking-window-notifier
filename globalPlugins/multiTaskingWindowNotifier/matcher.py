@@ -26,7 +26,8 @@ from . import beepPlayer
 from . import store
 from . import settings
 from .appIdentity import makeKey, splitKey
-from .constants import CLASSIC_PRESET_ID, PRESETS, SCOPE_APP, SCOPE_WINDOW
+from .constants import SCOPE_APP, SCOPE_WINDOW
+from .presets import CLASSIC_PRESET_ID, PRESETS
 
 # beepPlayer 모듈 자체를 import하고 호출 시점에 속성 lookup한다.
 # `from .beepPlayer import play_beep`로 바인딩하면 테스트에서 beepPlayer 모듈에
