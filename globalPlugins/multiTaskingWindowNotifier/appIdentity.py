@@ -3,7 +3,19 @@
 
 """앱/창 식별 및 저장용 키 생성·파싱 유틸."""
 
+import re
+
 from logHandler import log
+
+
+# 모듈 레벨 상수 (1회 컴파일/정의)
+_LEADING_DIRTY = ("*", "●", "◌", "•")
+# 변동 카운트 토큰: (N), [N], {N}, (N+) 형태. N은 1~4자리 정수.
+# 점을 허용하지 않아 dotted version (3.11) 등은 보존.
+# alternation으로 여는·닫는 괄호 종류를 짝 맞춰 mismatch(`(5]`) 매칭 차단.
+_RE_COUNT_TOKEN = re.compile(r"^(\(\d{1,4}\+?\)|\[\d{1,4}\+?\]|\{\d{1,4}\+?\})$")
+# 단독 구분자 토큰 — 선두/꼬리에서만 dangling으로 정리.
+_SEPARATOR_TOKENS = frozenset({"·", "•", "●", "-", "—"})
 
 
 def getAppId(obj) -> str:
@@ -57,49 +69,87 @@ def splitKey(entry: str):
     return "", entry  # 구형: 제목만
 
 
-def normalize_title(name: str) -> str:
-    """창 제목에서 **선두 dirty 마커**와 **꼬리 ' - 앱명' 서픽스**를 제거해 순수 탭 제목만 남긴다.
+def _strip_dirty_markers(s: str) -> str:
+    """1단계: 선두 dirty 마커(`*`, `●`, `◌`, `•`)를 순차 제거.
 
-    Alt+Tab obj.name('제목 없음 - 메모장'), editor fg.name('*룰루루 - 메모장'),
-    MRU obj.name('새로운 10') 세 경로가 전부 같은 형태로 떨어지게 하려고 도입.
-    appId가 `scope=window` 복합키의 1등 요소라, title에 앱명까지 중복 저장할
-    이유가 없다.
+    Notepad++의 '*', VS Code의 '●' 등 "저장 안 된 변경사항" 표시. editor focus
+    시 fg.name에는 있는데 MRU 오버레이의 obj.name에는 없는 경우가 있어 제거
+    없으면 key 불일치(실측 확인).
+    """
+    while s and s[0] in _LEADING_DIRTY:
+        s = s[1:].lstrip()
+    return s
+
+
+def _strip_app_suffix(s: str) -> str:
+    """2단계: 꼬리 앱 서픽스 제거. em-dash(' — ') 1순위, hyphen(' - ') 2순위.
+
+    브라우저 탭은 em-dash로 앱명을 분리하는 게 표준(`tab title — Mozilla
+    Firefox`). hyphen은 콘텐츠 본문에 흔히 등장하므로 후순위. em-dash가 있으면
+    그것만 사용해 hyphen을 잘못 자르는 회귀를 막는다.
+
+    `appModule.productName`을 쓰지 않는 이유: 한글 Windows 메모장처럼
+    productName(영문 'Notepad')이 title bar의 한글('메모장')과 어긋나는 리소스
+    번역 불일치가 있기 때문. rsplit은 그 불일치와 무관하게 robust.
+    """
+    if " — " in s:
+        return s.rsplit(" — ", 1)[0].rstrip()
+    if " - " in s:
+        return s.rsplit(" - ", 1)[0].rstrip()
+    return s
+
+
+def _strip_volatile_tokens(s: str) -> str:
+    """3·4단계: 변동 카운트 토큰 제거 + 선두/꼬리 dangling 구분자 정리.
+
+    카운트 토큰: `(N)`, `[N]`, `{N}`, `(N+)`. N은 1~4자리 정수. 위치 무관(선두/
+    인라인 모두). 사용자 핵심 요구는 "(79)→(3) 변동에도 같은 키 유지".
+
+    dotted version `(3.11)`은 점 포함이라 정규식 비매칭으로 보존. 5자리 이상
+    `(12345)`도 보존(실측상 알림 카운트는 4자리 이내, 99+ 형태로 truncate).
+
+    dangling 정리는 선두/꼬리만. 본문 중간의 `Chapter 1 — Introduction` 같은
+    em-dash는 보존(콘텐츠 일부일 수 있음).
+    """
+    tokens = s.split()
+    if not tokens:
+        return ""
+    kept = [t for t in tokens if not _RE_COUNT_TOKEN.match(t)]
+    while kept and kept[0] in _SEPARATOR_TOKENS:
+        kept.pop(0)
+    while kept and kept[-1] in _SEPARATOR_TOKENS:
+        kept.pop()
+    return " ".join(kept)
+
+
+def normalize_title(name: str) -> str:
+    """창 제목에서 변동/장식 요소를 제거해 안정 매칭 키만 남긴다.
+
+    4단계 파이프라인 (등록 시점과 매칭 시점 모두 같은 함수 통과 → 자기 일관성):
+        1. `_strip_dirty_markers` — 선두 `*●◌•`
+        2. `_strip_app_suffix`    — 꼬리 ` — 앱명` (em-dash 1순위) / ` - 앱명`
+        3·4. `_strip_volatile_tokens` — `(N)` 카운트 + 선두/꼬리 dangling 구분자
 
     예시:
-        '제목 없음 - 메모장'                 → '제목 없음'
-        '*새로운 10 - Notepad++'             → '새로운 10'  (Notepad++ dirty 마커)
-        '● main.py - VS Code'                → 'main.py'   (VS Code 수정됨 표시)
-        'Chapter 1 - Introduction - NPP'     → 'Chapter 1 - Introduction'
-        '새로운 10' (MRU, 서픽스 없음)       → '새로운 10'
-        '' / None                            → ''
+        '제목 없음 - 메모장'                                  → '제목 없음'
+        '*새로운 10 - Notepad++'                              → '새로운 10'
+        '● main.py - VS Code'                                 → 'main.py'
+        '(12) · news_Healing — Mozilla Firefox'               → 'news_Healing'
+        '받은편지함 (79) - x@y.com - Gmail — Mozilla Firefox' → '받은편지함 - x@y.com - Gmail'
+        'Python (3.11) Release Notes — Mozilla Firefox'       → 'Python (3.11) Release Notes'
+        '' / None                                              → ''
 
-    구현:
-        1. 선두 dirty 마커 제거 — Notepad++의 '*', VS Code의 '●' 등 "저장 안 된
-           변경사항 있음" 을 나타내는 문자. editor focus 시 fg.name엔 있는데
-           MRU 오버레이 같은 다른 경로 obj.name엔 없는 경우가 있어 제거 없으면
-           key 불일치로 매칭 실패(실측 확인).
-        2. 꼬리 ' - 앱명' 한 덩이 제거. `appModule.productName`을 쓰지 않는
-           이유는 한글 Windows 메모장처럼 productName(영문 'Notepad')이 title
-           bar의 한글('메모장')과 어긋나는 리소스 번역 불일치가 있기 때문.
-           rsplit은 그 불일치와 무관하게 robust.
-
-    엣지:
-        - 타이틀이 실제로 '*'로 시작하는 희귀 케이스(예: 파일명 "*.py"를 그대로
-          표시)는 잘못 제거될 수 있으나 매칭 소스도 같은 규칙을 거치므로 기능
-          손실 없음.
-        - 정상 타이틀이 ' - '를 포함("Chapter 1 - Intro")하면 마지막 덩이가
-          앱명이 아니어도 제거되지만 역시 매칭 소스가 같은 규칙을 거친다.
+    엣지(허용):
+        - '*.py' 같은 파일명 선두 '*'는 잘못 벗겨지나 매칭 소스도 같은 규칙.
+        - 콘텐츠에 ' - '가 들어가도 마지막 덩이는 잘림(매칭 자기 일관성 우선).
+        - 이메일/계정명은 변동값 아니므로 보존(사용자 동의 없는 마스킹 회피).
     """
     s = (name or "").strip()
     if not s:
         return ""
-    # 1) 선두 dirty 마커들 순차 제거. 공백 섞여 있어도 벗긴다.
-    #    대표 예: Notepad++('*'), VS Code('●'), Sublime('●'/'◌').
-    while s and (s[0] in ("*", "●", "◌", "•")):
-        s = s[1:].lstrip()
+    s = _strip_dirty_markers(s)
     if not s:
         return ""
-    # 2) 꼬리 ' - 앱명' 서픽스 제거
-    if " - " in s:
-        s = s.rsplit(" - ", 1)[0].rstrip()
+    s = _strip_app_suffix(s)
+    s = _strip_volatile_tokens(s)
     return s
