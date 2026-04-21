@@ -61,6 +61,7 @@ __all__ = [
     "get_tab_beep_idx",
     "is_corrupted",
     "load",
+    "move_item",
     "record_switch",
     "reload",
     "save",
@@ -575,6 +576,50 @@ def set_aliases(list_path: str, key: str, aliases) -> bool:
         log.warning(f"mtwn: set_aliases key not found {key!r}")
         return False
     found["aliases"] = clean
+    state["dirty"] = True
+    if _save_to_disk(list_path, state):
+        state["dirty"] = False
+        return True
+    return False
+
+
+def move_item(list_path: str, key: str, direction: str) -> bool:
+    """items 배열에서 key 항목을 한 칸 위/아래로 이동하고 즉시 저장.
+
+    등록 순서가 곧 표시 순서. 이동 성공 시 배열의 인접 두 요소를 swap하고
+    원자적 `.tmp → replace`로 디스크 반영.
+
+    Args:
+        list_path: 기존 app.list 경로 (내부에서 app.json으로 변환)
+        key: 이동할 entry key. scope=window는 "appId|title", scope=app은 "appId".
+        direction: "up" 또는 "down".
+
+    Returns:
+        True: 이동 + 저장 성공.
+        False: key 미존재 / 경계(up인데 idx=0, down인데 마지막) / direction 오값 /
+            디스크 저장 실패.
+    """
+    if direction not in ("up", "down"):
+        return False
+    state = _load_state(list_path)
+    items = state["items"]
+    idx = None
+    for i, it in enumerate(items):
+        if it.get("key") == key:
+            idx = i
+            break
+    if idx is None:
+        log.warning(f"mtwn: move_item key not found {key!r}")
+        return False
+    if direction == "up":
+        if idx == 0:
+            return False
+        swap_idx = idx - 1
+    else:  # "down"
+        if idx >= len(items) - 1:
+            return False
+        swap_idx = idx + 1
+    items[idx], items[swap_idx] = items[swap_idx], items[idx]
     state["dirty"] = True
     if _save_to_disk(list_path, state):
         state["dirty"] = False
