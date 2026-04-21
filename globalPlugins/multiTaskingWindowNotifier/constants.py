@@ -57,13 +57,12 @@ ALT_TAB_OVERLAY_WCN = "Windows.UI.Input.InputSite.WindowClass"
 # Windows 11 Xaml Shell 고정값. 로케일 독립.
 ALT_TAB_HOST_FG_WCN = "XamlExplorerHostIslandWindow"
 
-# 디바운스 flush 임계치. GlobalPlugin._maybe_flush가 직접 참조한다(Phase 12-4에서
-# FlushScheduler 클래스 해체 후 GlobalPlugin 메서드로 이관). 향후 사용자 조정
-# 옵션화도 이 상수를 기준으로 확장.
+# 디바운스 flush 임계치. GlobalPlugin._maybe_flush가 직접 참조한다.
+# 향후 사용자 조정 옵션화도 이 상수를 기준으로 확장.
 FLUSH_EVERY_N_DEFAULT = 10
 FLUSH_INTERVAL_SEC_DEFAULT = 30
 
-# 프리셋 데이터/빌더/불변식/폴백/마이그레이션은 Phase 7.1부터 `presets.py`가 단일
-# 소유자. 과거 본 파일에 있던 `PRESETS` / `CLASSIC_PRESET_ID` / `_PENTATONIC_FREQS`
-# / `_build_fifths_freqs` / 부팅 assert 블록은 전부 그쪽으로 이관.
+# 프리셋 데이터/빌더/불변식/폴백/마이그레이션은 `presets.py`가 단일 소유자.
+# `PRESETS` / `CLASSIC_PRESET_ID` / freqs 빌더 / 부팅 assert 블록은 전부
+# 그쪽에 있다.
 # 다른 모듈이 이 파일에서 프리셋 심볼을 import하지 않도록 주의.

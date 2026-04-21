@@ -3,7 +3,7 @@
 
 """NVDA 설정 대화상자의 "창 전환 알림" 패널.
 
-스키마는 `settings.py`(Phase 1)의 CONFSPEC을 따른다. 본 모듈은 UI 레이어로,
+스키마는 `settings.py`의 CONFSPEC을 따른다. 본 모듈은 UI 레이어로,
 사용자 대면 문자열만 담당하며 스키마/값 검증은 `config.conf.spec`에 위임한다.
 
 NVDA 설정 등록/해제는 `__init__.py`의 `GlobalPlugin.__init__/terminate`에서
@@ -41,7 +41,7 @@ DURATION_MIN, DURATION_MAX = 20, 500
 GAP_MIN, GAP_MAX = 0, 200
 
 # 프리셋 type → 사용자 노출 카테고리 레이블. ListBox 항목 접두사로 사용.
-# Phase 11: hybrid 타입(synthEngine 경유 파형 합성) 전면 제거로 tonal만 남음.
+# hybrid 타입(synthEngine 경유 파형 합성)은 제거되고 tonal만 남는다.
 _TYPE_CATEGORY_LABELS = {
     "tonal": _("음계"),
 }

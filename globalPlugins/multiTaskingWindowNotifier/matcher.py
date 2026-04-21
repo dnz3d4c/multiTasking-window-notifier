@@ -16,10 +16,9 @@ Matcher는 GlobalPlugin 인스턴스를 참조해 다음을 조회한다:
 
 역방향(Matcher → GlobalPlugin) 의존은 이 4개뿐. 반대는 없다.
 
-LookupIndex는 Phase 12-4에서 lookupIndex.py 파일 삭제와 함께 본 파일에 이관됐다.
-매칭 핫 패스의 1차 상태(windowLookup/appLookup)를 담는 전용 클래스로, Matcher와
-라이프사이클·소유자(GlobalPlugin)를 공유한다. 클래스 경계는 SRP 유지를 위해
-분리.
+LookupIndex는 매칭 핫 패스의 1차 상태(windowLookup/appLookup)를 담는 전용 클래스로,
+Matcher와 라이프사이클·소유자(GlobalPlugin)를 공유한다. 클래스 경계는 SRP 유지를
+위해 분리한다.
 """
 
 from __future__ import annotations
@@ -102,7 +101,7 @@ class LookupIndex:
 # `from .beepPlayer import play_beep`로 바인딩하면 테스트에서 beepPlayer 모듈에
 # monkeypatch해도 본 모듈의 참조는 안 바뀌어 fake 비프가 작동 안 한다.
 
-# Phase 2: 반복 억제 — 활성 프리셋의 suppressRepeat=True일 때만 적용되는,
+# 반복 억제 — 활성 프리셋의 suppressRepeat=True일 때만 적용되는,
 # "같은 매칭 키 재진입이 이 시간 내면 탭음 생략" 창 크기. 짧게 잡아 실사용
 # Alt+Tab 연타나 NVDA 이벤트 근접 재발화에만 걸리고 정상 창 전환에는 영향 없게.
 _SUPPRESS_REPEAT_SEC = 0.3
@@ -130,7 +129,7 @@ class Matcher:
 
     signature_guard는 "같은 이벤트 중복 흡수"가 목적이고, _last_matched_key는 "사용자
     행동 기반 반복 판정"이 목적이라 리셋 정책이 일부러 다르다. 단순화하면
-    pentatonic 프리셋 UX가 후퇴함(리뷰 2026-04-20 C2 결정).
+    pentatonic 프리셋 UX가 후퇴한다.
     """
 
     def __init__(self, plugin):
@@ -139,7 +138,7 @@ class Matcher:
         # 확정 탭 전환은 title 또는 tab_signature(hwnd)가 바뀌므로 자연 통과하고,
         # 같은 탭 자식 컨트롤 재진입 같은 이벤트 중복 폭주만 흡수한다.
         self.last_event_signature = None
-        # Phase 2: 반복 억제/옥타브 변주용 최근 매칭 상태. signature_guard와 별도 —
+        # 반복 억제/옥타브 변주용 최근 매칭 상태. signature_guard와 별도 —
         # signature_guard는 이벤트 식별자(tab_signature 포함)로 "같은 이벤트 중복 흡수",
         # 여기는 "같은 매칭 key 재진입"이라는 사용자 행동 기반.
         self._last_matched_key = None
@@ -234,10 +233,10 @@ class Matcher:
             # 되는 버그 방지. 자식 컨트롤 재진입은 matched_key 확정 경로에서만
             # 발생하므로 이 리셋의 영향권 밖.
             #
-            # Phase 2 참고: `_last_matched_key`는 의도적으로 리셋하지 않는다. "A →
-            # 미스 창 → A 복귀" 시 두 번째 A 진입도 사용자 관점에서 "같은 창 빠른
-            # 복귀"이므로 suppressRepeat/octaveVariation의 관심 영역. signature_guard와
-            # 역할이 다르므로 둘의 리셋 정책도 독립.
+            # `_last_matched_key`는 의도적으로 리셋하지 않는다. "A → 미스 창 → A 복귀"
+            # 시 두 번째 A 진입도 사용자 관점에서 "같은 창 빠른 복귀"이므로
+            # suppressRepeat/octaveVariation의 관심 영역. signature_guard와 역할이
+            # 다르므로 둘의 리셋 정책도 독립.
             self.last_event_signature = None
             return
 
@@ -254,7 +253,7 @@ class Matcher:
 
         app_idx, tab_idx = self._resolve_beep_pair(matched_key, scope, appId)
 
-        # Phase 2: 활성 프리셋의 반복 억제/옥타브 변주 적용. 두 플래그는 독립
+        # 활성 프리셋의 반복 억제/옥타브 변주 적용. 두 플래그는 독립
         # 구성이라 한쪽만 켜도 동작. 옥타브 변주는 suppressRepeat에 가려지면
         # (tab_idx=None) 의미 없음 — 우선순위 상 자연 무시된다.
         preset = self._active_preset()
@@ -283,7 +282,7 @@ class Matcher:
             # 디버깅 방해).
             slot_count = preset["slotCount"]
             new_idx = tab_idx + shift
-            # Phase 3에서 modulo wrap 도입 예정. 지금은 범위 밖이면 clip.
+            # 범위 밖이면 clip.
             tab_idx = max(0, min(slot_count - 1, new_idx))
         else:
             # 다른 key로 전환되면 옥타브 토글 상태 초기화 — "같은 key 연속" 의미가

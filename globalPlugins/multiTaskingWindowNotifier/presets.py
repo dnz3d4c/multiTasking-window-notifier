@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 # GNU General Public License v2.0-or-later
 
-"""프리셋 데이터 단일 소유자 모듈 (Phase 7.1 신설).
+"""프리셋 데이터 단일 소유자 모듈.
 
 여러 모듈(constants/beepPlayer/settings/settingsPanel)에 산재했던 프리셋 관련
 로직 — dict 정의, freqs 빌더, 부팅 불변식 assert, 폴백 경고 — 을 한 모듈로
@@ -27,8 +27,8 @@
 과거 철회된 프리셋(drum_kit/lazer_pack/eight_bit_jump/daily_life/humor_pack/
 arcade_pop/coin_dash/glass_step/soft_retro)은 이 모듈에 존재하지 않는다. 사용자
 저장값에 그 id가 남아있어도 `get_preset_or_classic`의 미지 id 폴백 경로가
-classic으로 흡수해 재생 자체는 정상 동작한다. Phase 11에서 hybrid 타입(waveform
-필드 경유 synthEngine 합성 경로)은 전면 제거됐다 — `tones.beep` 단일 경로.
+classic으로 흡수해 재생 자체는 정상 동작한다. hybrid 타입(waveform 필드 경유
+합성 경로)은 제거되고 `tones.beep` 단일 경로로 운영한다.
 """
 
 from logHandler import log
@@ -93,7 +93,7 @@ _A_MINOR_FREQS = [
 
 
 # ---------------------------------------------------------------------------
-# 프리셋 dict — Phase 11 기준 4개 (classic/pentatonic/fifths/moss_bell)
+# 프리셋 dict — 4개 (classic/pentatonic/fifths/moss_bell)
 # 모두 tonal 타입, tones.beep 경로.
 # ---------------------------------------------------------------------------
 
@@ -136,10 +136,9 @@ PRESETS = {
         "suppressRepeat": False,
         "octaveVariation": False,
     },
-    # Phase 7.5: 정서축(애조)을 채우는 tonal 신규. classic/pentatonic/fifths가
-    # 모두 밝은 장조 또는 중립이라 애조가 비어있었다.
-    # (Phase 8에서 같이 추가됐던 glass_step[saw/whole-tone]은 날카로움 피드백
-    # 으로 제거.)
+    # 정서축(애조)을 채우는 tonal 프리셋. classic/pentatonic/fifths가 모두 밝은
+    # 장조 또는 중립이라 애조가 비어있었다. 같이 추가됐던 glass_step
+    # (saw/whole-tone)은 날카로움 피드백으로 제거됐다.
     "moss_bell": {
         "id": "moss_bell",
         "nameLabel": "Moss Bell",

@@ -74,8 +74,7 @@ class GlobalPlugin(ScriptsMixin, globalPluginHandler.GlobalPlugin):
         self._lookup = LookupIndex(meta_provider=self._meta_for)
         self._rebuild_lookup()
         # 전환 카운트 디바운스 상태: 매칭 성공마다 _pending++, 임계치 넘으면 flush.
-        # Phase 12-4에서 switchFlusher.FlushScheduler 클래스를 해체해 GlobalPlugin
-        # 메서드·필드로 직접 흡수. Matcher가 flush를 몰라도 되도록 레이어 분리 유지.
+        # Matcher가 flush를 몰라도 되도록 레이어 분리 유지(매칭 후 기록은 플러그인 책임).
         self._pending_switches = 0
         self._last_flush_at = time.monotonic()
         # 매칭 + 비프 재생 + 시그니처 dedup 캡슐화. dedup 상태는
@@ -137,7 +136,7 @@ class GlobalPlugin(ScriptsMixin, globalPluginHandler.GlobalPlugin):
         """appList 변경 시 lookup 재구성. 실제 로직은 LookupIndex.rebuild."""
         self._lookup.rebuild(self.appList)
 
-    # ---- 디바운스 flush (Phase 12-4에서 FlushScheduler 해체 후 이관) ----
+    # ---- 디바운스 flush ----
 
     def _notify_switch(self):
         """매칭 성공 1회 = 미저장 전환 카운트 +1."""

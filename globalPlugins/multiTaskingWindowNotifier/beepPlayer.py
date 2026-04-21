@@ -11,9 +11,9 @@ v4 2차원 비프:
     - a와 b가 순차로 재생되므로 절대 비교 대신 상대 비교가 되어 작은 간격도
       충분히 변별된다.
 
-Phase 11: NVDA `tones.beep` 단일 경로로 통합. 과거 hybrid 프리셋의 파형 합성
-(synthEngine.render_wav + nvwave.playWaveFile) 경로는 제거. `tones.beep`은
-20년+ 안정 SDK이고 NVDA 다른 애드온 관용과 일치.
+NVDA `tones.beep` 단일 경로로 통합. 과거 hybrid 프리셋의 파형 합성
+(synthEngine.render_wav + nvwave.playWaveFile) 경로는 제거됐다. `tones.beep`은
+20년+ 안정 SDK이고 NVDA 다른 애드온 관용과 일치한다.
 
 타이밍 원칙:
     - gap_ms는 NVDA `core.callLater`로 비동기 예약. 내부에서 wx.CallLater를

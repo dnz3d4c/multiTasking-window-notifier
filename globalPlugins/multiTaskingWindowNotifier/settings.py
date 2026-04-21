@@ -6,7 +6,7 @@
 NVDA의 config 모듈에 `confspec`을 등록해
 `config.conf[ADDON_NAME][...]`로 접근 가능하도록 한다.
 
-UI는 settingsPanel.py(Phase 3)에서 별도 제공. 본 모듈은 스키마만 담당.
+UI는 settingsPanel.py에서 별도 제공. 본 모듈은 스키마만 담당.
 """
 
 import re
@@ -41,11 +41,11 @@ CONFSPEC = {
 #                          MAX_ITEMS(128) 디커플 + 비프 변별이 BEEP_TABLE 안에서
 #                          끝나서 사용자가 줄일 실용 이유 없음. MAX_ITEMS 상수만으로
 #                          하드 상한 충분.
-# - humorPackWarningShown: humor_pack 옵트인 프리셋 1회성 경고 플래그. Phase 7.4
-#                          에서 humor_pack 자체가 철회되며 의미 소멸.
-# - beepVolume           : Phase 6에서 도입했던 nvwave 경로(hybrid 프리셋) 볼륨
-#                          슬라이더. Phase 11에서 synthEngine/hybrid 전면 제거로
-#                          의미 소멸. tones.beep은 NVDA 전역 볼륨 체계를 따른다.
+# - humorPackWarningShown: humor_pack 옵트인 프리셋 1회성 경고 플래그.
+#                          humor_pack 자체가 철회되며 의미 소멸.
+# - beepVolume           : nvwave 경로(hybrid 프리셋) 볼륨 슬라이더.
+#                          synthEngine/hybrid 전면 제거로 의미 소멸.
+#                          tones.beep은 NVDA 전역 볼륨 체계를 따른다.
 # register()에서 1회성으로 nvda.ini 잔재를 정리한다(다음 NVDA 종료 시 디스크 반영).
 _OBSOLETE_KEYS = (
     "beepVolumeLeft", "beepVolumeRight", "maxItems", "humorPackWarningShown",

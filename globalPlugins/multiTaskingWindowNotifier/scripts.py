@@ -3,9 +3,8 @@
 
 """@script 핸들러 모음을 GlobalPlugin에서 분리.
 
-Phase 2 최종 단계. `__init__.py`에는 설정/이벤트 훅/모듈 결합만 남기고
-단축키 4종과 보조 헬퍼(_do_add / _delete_entries_from_dialog)는 이 파일의
-`ScriptsMixin`이 담당한다.
+`__init__.py`는 설정/이벤트 훅/모듈 결합만 담당하고, 단축키 4종과 보조 헬퍼
+(_do_add / _delete_entries_from_dialog)는 이 파일의 `ScriptsMixin`이 담당한다.
 
 NVDA의 스크립트 스캔은 클래스 MRO를 따르므로 mixin 메서드의 @script
 데코레이터도 GlobalPlugin 서브클래스에서 정상 바인딩된다.
@@ -183,8 +182,7 @@ class ScriptsMixin(metaclass=ScriptableType):
 
         alias는 `_prompt_for_alias`가 반환한 정규화 전 원문. 빈 문자열이면
         aliases=[] (기본값)으로 저장. 비어있지 않으면 normalize_title 적용
-        후 aliases=[정규화값] 1개만 저장. Phase 7 UI 규약: 한 항목당 최대
-        alias 1개.
+        후 aliases=[정규화값] 1개만 저장. UI 규약: 한 항목당 최대 alias 1개.
         """
         # 중복 체크: scope별로 나뉘므로 같은 appId여도 창 등록과 앱 등록은 공존 허용.
         if scope == SCOPE_WINDOW:

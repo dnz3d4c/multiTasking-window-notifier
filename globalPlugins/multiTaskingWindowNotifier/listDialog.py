@@ -3,17 +3,14 @@
 
 """등록된 창/앱 목록을 보여주고 삭제/편집까지 처리하는 wx.Dialog.
 
-Phase 3 변경:
+기능:
     - scope 표시: `[앱] chrome` / `[창] chrome | YouTube ...`
     - 다중 선택(`wx.LB_EXTENDED`) + Delete 키/삭제 버튼으로 일괄 삭제
     - 앱 entry 삭제 시 "관련 창도 같이 지울까요?" 확인 다이얼로그
     - 실제 저장/lookup 갱신은 호출자가 주입한 on_delete 콜백 책임 (결합도 낮춤)
-
-Phase 7 변경 (v8 aliases):
-    - 표시 텍스트에 alias 꼬리표 `(대체: 대화창제목)` 추가 (alias 있을 때만).
-    - "편집(&E)" 버튼 추가 — 단일 선택 + on_edit_alias 콜백 주입 시에만 노출.
-    - 메타 조회 콜백을 `get_scope(entry) -> str`에서 `get_meta(entry) -> dict`로
-      확장. 기존 호출부 호환을 위해 `get_scope`도 여전히 수용.
+    - 표시 텍스트에 alias 꼬리표 `(대체: 대화창제목)` 추가 (alias 있을 때만)
+    - "편집(&E)" 버튼 — 단일 선택 + on_edit_alias 콜백 주입 시에만 노출
+    - 메타 조회 콜백 `get_meta(entry) -> dict`. 기존 호환용 `get_scope`도 여전히 수용.
 """
 
 import wx
@@ -33,7 +30,7 @@ except Exception:
         return s
 
 
-# ---- wx 없이 단위 테스트 가능한 순수 함수(Phase 4.2) ----
+# ---- wx 없이 단위 테스트 가능한 순수 함수 ----
 
 
 def format_display_text(entry: str, scope: str, aliases=None) -> str:
@@ -43,8 +40,8 @@ def format_display_text(entry: str, scope: str, aliases=None) -> str:
     비어 있는 구형 entry는 "앱 미지정" 라벨로 폴백 — wx 의존성 없이 단위
     테스트 가능하도록 module-level로 추출했다.
 
-    aliases가 비어 있지 않으면 꼬리에 `(대체: a1, a2)`를 붙인다. Phase 7
-    UI 규약상 alias는 1개만 저장하지만 포맷은 배열 전체 지원.
+    aliases가 비어 있지 않으면 꼬리에 `(대체: a1, a2)`를 붙인다. UI 규약상
+    alias는 1개만 저장하지만 포맷은 배열 전체 지원.
     """
     if scope == SCOPE_APP:
         base = f"[앱] {entry}"
