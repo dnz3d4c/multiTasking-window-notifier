@@ -332,6 +332,7 @@ class ScriptsMixin(metaclass=ScriptableType):
                 get_meta=self._meta_for,
                 on_delete=self._delete_entries_from_dialog,
                 on_edit_alias=self._edit_alias_from_dialog,
+                on_move=self._move_entry_from_dialog,
             )
             dlg.ShowModal()
             dlg.Destroy()
@@ -410,4 +411,27 @@ class ScriptsMixin(metaclass=ScriptableType):
             f"mtwn: alias edited entry={entry!r} "
             f"{current!r} → {normalized!r}"
         )
+        return True
+
+    def _move_entry_from_dialog(self, entry: str, direction: str) -> bool:
+        """목록 다이얼로그에서 단일 항목 순서 변경 호출. 저장 성공 여부 반환.
+
+        store.move_item이 .tmp→replace로 즉시 디스크 반영. 이후 캐시된 state에서
+        appList(키 순서)를 다시 읽어와 LookupIndex를 재구성한다. 매칭은 scope/
+        aliases 기반이라 순서 변경의 부작용은 없지만, idx 기반 동작(디버그 로그
+        등)을 위해 rebuild는 유지.
+
+        Returns:
+            True: 이동+저장 성공.
+            False: 경계/미존재/디스크 실패. listDialog가 wx.MessageBox 담당.
+        """
+        if not store.move_item(self.appListFile, entry, direction):
+            return False
+        self.appList = store.load(self.appListFile)
+        self._rebuild_lookup()
+        ui.message(
+            _("위로 이동했어요.") if direction == "up" else _("아래로 이동했어요."),
+            speechPriority=speech.Spri.NEXT,
+        )
+        log.info(f"mtwn: dialog move entry={entry!r} dir={direction}")
         return True

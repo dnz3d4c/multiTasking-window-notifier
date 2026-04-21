@@ -1,15 +1,19 @@
 # -*- coding: utf-8 -*-
 # GNU General Public License v2.0-or-later
 
-"""등록된 창/앱 목록을 보여주고 삭제/편집까지 처리하는 wx.Dialog.
+"""등록된 창/앱 목록을 보여주고 삭제/편집/순서 변경을 처리하는 wx.Dialog.
 
 기능:
     - scope 표시: `[앱] chrome` / `[창] chrome | YouTube ...`
+    - 표시 순서는 **등록(저장) 순서** 그대로. 사전순 재정렬하지 않는다 —
+      "위로/아래로 이동" 조작이 시각적으로 반영되려면 이 전제가 필요.
     - 다중 선택(`wx.LB_EXTENDED`) + Delete 키/삭제 버튼으로 일괄 삭제
     - 앱 entry 삭제 시 "관련 창도 같이 지울까요?" 확인 다이얼로그
     - 실제 저장/lookup 갱신은 호출자가 주입한 on_delete 콜백 책임 (결합도 낮춤)
     - 표시 텍스트에 alias 꼬리표 `(대체: 대화창제목)` 추가 (alias 있을 때만)
     - "편집(&E)" 버튼 — 단일 선택 + on_edit_alias 콜백 주입 시에만 노출
+    - "위로 이동(&U)"/"아래로 이동(&N)" — 단일 선택 + on_move 콜백 주입 시에만 노출.
+      경계(맨 위/맨 아래)에서 해당 방향 버튼 자동 비활성.
     - 메타 조회 콜백 `get_meta(entry) -> dict`. 기존 호환용 `get_scope`도 여전히 수용.
 """
 
@@ -100,10 +104,13 @@ class AppListDialog(wx.Dialog):
         on_edit_alias: callable(entry: str) -> (True | False | None).
             편집 버튼을 노출할지 결정. None이면 편집 UI 비활성화.
             True=편집 성공(목록 갱신), False=저장 실패(에러 표시), None=사용자 취소.
+        on_move: callable(entry: str, direction: "up" | "down") -> bool.
+            위/아래 이동 버튼을 노출할지 결정. None이면 이동 UI 비활성화.
+            True=이동+저장 성공, False=저장 실패(에러 표시).
     """
 
     def __init__(self, parent, appList, get_meta=None, get_scope=None,
-                 on_delete=None, on_edit_alias=None):
+                 on_delete=None, on_edit_alias=None, on_move=None):
         super().__init__(parent, title=_("등록된 창 목록"))
         self.appList = list(appList)
         # get_meta 우선, 없으면 get_scope를 어댑터로 감싸 dict로 승격.
@@ -115,8 +122,10 @@ class AppListDialog(wx.Dialog):
             self._get_meta = lambda e: {"scope": SCOPE_WINDOW, "aliases": []}
         self._on_delete = on_delete
         self._on_edit_alias = on_edit_alias
-        # 표시 순서: scope 무관하게 표시 텍스트 정렬. 내부 entry 매핑은 _entries에 보관.
-        self._entries = sorted(self.appList, key=lambda e: self._display_text(e).lower())
+        self._on_move = on_move
+        # 표시 순서는 appList(등록 순서) 그대로. 사전순 재정렬 시 위/아래 이동 조작이
+        # 시각적으로 반영되지 않는다 — 이 순서가 곧 "사용자가 바꿀 수 있는 순서".
+        self._entries = list(self.appList)
         self._create_ui()
         self.CenterOnScreen()
 
@@ -146,11 +155,15 @@ class AppListDialog(wx.Dialog):
             size=(560, 320),
         )
         self.listBox.Bind(wx.EVT_KEY_DOWN, self._on_listbox_key)
+        # 선택 변경 시 이동 버튼 활성/비활성 재계산 (on_move 주입된 경우만 의미 있음).
+        self.listBox.Bind(wx.EVT_LISTBOX, self._on_listbox_selection)
 
-        # "선택 항목 삭제"/"대체 제목 편집"은 다이얼로그를 닫지 않는 action 버튼이므로
-        # addItem으로. addDialogDismissButtons는 dismiss 전용(닫기/취소 류)에만 쓰는 게
-        # guiHelper 계약.
-        if self._on_delete is not None or self._on_edit_alias is not None:
+        # "선택 항목 삭제"/"대체 제목 편집"/"위로·아래로 이동"은 다이얼로그를 닫지 않는
+        # action 버튼이므로 addItem으로. addDialogDismissButtons는 dismiss 전용(닫기/
+        # 취소 류)에만 쓰는 게 guiHelper 계약.
+        self.moveUpBtn = None
+        self.moveDownBtn = None
+        if self._on_delete is not None or self._on_edit_alias is not None or self._on_move is not None:
             actionButtons = guiHelper.ButtonHelper(wx.HORIZONTAL)
             if self._on_delete is not None:
                 self.deleteBtn = actionButtons.addButton(self, label=_("선택 항목 삭제(&D)"))
@@ -158,6 +171,14 @@ class AppListDialog(wx.Dialog):
             if self._on_edit_alias is not None:
                 self.editBtn = actionButtons.addButton(self, label=_("대체 제목 편집(&E)"))
                 self.editBtn.Bind(wx.EVT_BUTTON, self._on_edit_button)
+            if self._on_move is not None:
+                # 핫키: &U(Up), &N(dowN). &D=삭제/&E=편집과 무충돌.
+                self.moveUpBtn = actionButtons.addButton(self, label=_("위로 이동(&U)"))
+                self.moveUpBtn.Bind(wx.EVT_BUTTON, self._on_move_up_button)
+                self.moveDownBtn = actionButtons.addButton(self, label=_("아래로 이동(&N)"))
+                self.moveDownBtn.Bind(wx.EVT_BUTTON, self._on_move_down_button)
+                # 선택 없음 상태에선 둘 다 비활성으로 시작.
+                self._update_move_buttons()
             sHelper.addItem(actionButtons)
 
         # dismiss 버튼(닫기)은 단일 버튼으로 addDialogDismissButtons에 전달.
@@ -194,11 +215,40 @@ class AppListDialog(wx.Dialog):
             return
         event.Skip()
 
+    def _on_listbox_selection(self, event):
+        # 프로그램 트리거 SetSelection에는 wxPython이 EVT_LISTBOX를 발화시키지 않으므로
+        # 사용자 조작에 의한 선택 변경에서만 호출된다.
+        self._update_move_buttons()
+        event.Skip()
+
     def _on_delete_button(self, event):
         self._delete_selected()
 
     def _on_edit_button(self, event):
         self._edit_selected_alias()
+
+    def _on_move_up_button(self, event):
+        self._move_selected("up")
+
+    def _on_move_down_button(self, event):
+        self._move_selected("down")
+
+    def _update_move_buttons(self):
+        """현재 선택 상태에 따라 위/아래 이동 버튼 활성/비활성 갱신.
+
+        규칙:
+            - on_move 콜백 없으면 no-op.
+            - 단일 선택이고 idx > 0 이면 위로 이동 활성.
+            - 단일 선택이고 idx < last 이면 아래로 이동 활성.
+            - 선택 없음/다중 선택: 둘 다 비활성.
+        """
+        if self.moveUpBtn is None or self.moveDownBtn is None:
+            return
+        sel = self.listBox.GetSelections()
+        single = len(sel) == 1
+        idx = sel[0] if single else -1
+        self.moveUpBtn.Enable(single and idx > 0)
+        self.moveDownBtn.Enable(single and 0 <= idx < len(self._entries) - 1)
 
     def _edit_selected_alias(self):
         """단일 선택 entry의 alias를 편집. 콜백이 저장/안내를 담당."""
@@ -230,6 +280,41 @@ class AppListDialog(wx.Dialog):
         # 성공 → 표시 텍스트 갱신 (alias 꼬리표 반영).
         idx = self._entries.index(entry)
         self.listBox.SetString(idx, self._display_text(entry))
+
+    def _move_selected(self, direction: str):
+        """단일 선택 entry를 한 칸 위/아래로 이동. on_move가 저장 담당.
+
+        경계 상태(맨 위/맨 아래)는 _update_move_buttons가 버튼을 비활성으로
+        만들어 도달 불가하지만, 키보드 핫키 경합 등 예외 경로 방어로 중복 검사.
+        """
+        sel = self.listBox.GetSelections()
+        if len(sel) != 1:
+            wx.Bell()
+            return
+        idx = sel[0]
+        entry = self._entries[idx]
+        new_idx = idx - 1 if direction == "up" else idx + 1
+        if new_idx < 0 or new_idx >= len(self._entries):
+            wx.Bell()
+            return
+        if not self._on_move(entry, direction):
+            wx.MessageBox(
+                _("저장 중 문제가 생겨 순서를 바꾸지 못했어요."),
+                _("오류"),
+                wx.OK | wx.ICON_ERROR,
+                self,
+            )
+            return
+        # 로컬 _entries + ListBox 표시 동기화 (두 항목만 swap).
+        self._entries[idx], self._entries[new_idx] = self._entries[new_idx], self._entries[idx]
+        self.listBox.SetString(idx, self._display_text(self._entries[idx]))
+        self.listBox.SetString(new_idx, self._display_text(self._entries[new_idx]))
+        # 이동한 항목 위치로 선택/포커스 이동 — 연속 조작을 위해.
+        self.listBox.DeselectAll()
+        self.listBox.SetSelection(new_idx)
+        self.listBox.SetFocus()
+        # 프로그램 호출은 EVT_LISTBOX를 발화시키지 않으므로 명시적으로 재계산.
+        self._update_move_buttons()
 
     def _delete_selected(self):
         selected = self._selected_entries()
@@ -278,6 +363,9 @@ class AppListDialog(wx.Dialog):
         # 모두 비었으면 자동으로 닫기
         if not self._entries:
             self.EndModal(wx.ID_OK)
+            return
+        # 선택이 모두 제거된 상태이므로 이동 버튼도 비활성으로 재계산.
+        self._update_move_buttons()
 
     def _on_ok(self, event):
         self.EndModal(wx.ID_OK)
