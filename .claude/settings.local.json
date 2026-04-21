@@ -19,7 +19,10 @@
       "Bash(git show:*)",
       "Bash(git checkout:*)",
       "Bash(date > .claude/last-review.txt)",
-      "Bash(date > *)"
+      "Bash(date > *)",
+      "Bash(mv \"C:\\\\Users\\\\advck\\\\.claude\\\\plans\\\\iridescent-tickling-hickey.md\" \"C:\\\\Users\\\\advck\\\\.claude\\\\plans\\\\archive/\")",
+      "Bash(mkdir -p \"C:\\\\Users\\\\advck\\\\.claude\\\\plans\\\\archive\")",
+      "Read(//c/Users/advck/.claude/plans/archive/**)"
     ]
   }
 }

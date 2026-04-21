@@ -336,6 +336,17 @@ DEFAULT_TAB_CLASSES = {
 - `nextHandler()` 호출 필수 (이벤트 체인 유지)
 - 최대 항목 수(128) 제한 준수 — `constants.MAX_ITEMS`
 
+### 불변 원칙 (리팩토링 교훈 누적)
+
+1. **모듈 분할 통합 검토 신호**: 상호 참조 docstring이 ≥ 2건 반복되면 물리 경계가 역할 경계와 어긋났다는 경고.
+2. **축약 변수명 도입 기준**: NVDA 소스(`C:\project\ext\nvda\source\**`)에서 원문 용어 존재 확인. 있으면 풀네임 유지.
+3. **단일 호출 얇은 래퍼 금지**: `rebuild` 1개 메서드 클래스, 필드 2개 클래스, property 1개 wrapper는 호출부 흡수 검토 대상.
+4. **사용자 명시 지침 > team-debate 판정**: 충돌 시 자동 우회 금지. 사용자에게 재확인.
+5. **방금 한 리팩토링 Phase 주석은 무조건 제거**: git log가 진실 원천. 코드 주석은 미래 독자에게 **원칙**만 전달하고 **이력**은 IMPROVEMENTS.md로.
+
+상세 사례 및 재사용 체크리스트: [docs/refactoring-phase12-lessons.md](docs/refactoring-phase12-lessons.md)
+실기 smoke test: [docs/smoke-test.md](docs/smoke-test.md)
+
 ### NVDA가 이미 보장하는 조건을 재방어하지 않는다 (Phase R 교훈)
 
 코드 작성/리뷰 전에 "NVDA가 이미 처리하는가?"를 먼저 확인. 중복 방어는 코드 복잡도만 올리고 실제 버그 숨김 원인이 된다.
