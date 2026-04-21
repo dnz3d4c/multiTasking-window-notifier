@@ -10,7 +10,7 @@
       "items": [
         {"key": "appId|title", "scope": "window",
          "appId": "...", "title": "...",
-         "aliases": ["링키지접근성"],
+         "aliases": ["대화창제목"],
          "tabBeepIdx": 0,
          "registeredAt": "YYYY-MM-DDTHH:MM:SS",
          "switchCount": 0,

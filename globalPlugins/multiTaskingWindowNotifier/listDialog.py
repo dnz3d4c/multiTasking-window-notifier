@@ -10,7 +10,7 @@ Phase 3 변경:
     - 실제 저장/lookup 갱신은 호출자가 주입한 on_delete 콜백 책임 (결합도 낮춤)
 
 Phase 7 변경 (v8 aliases):
-    - 표시 텍스트에 alias 꼬리표 `(대체: 링키지접근성)` 추가 (alias 있을 때만).
+    - 표시 텍스트에 alias 꼬리표 `(대체: 대화창제목)` 추가 (alias 있을 때만).
     - "편집(&E)" 버튼 추가 — 단일 선택 + on_edit_alias 콜백 주입 시에만 노출.
     - 메타 조회 콜백을 `get_scope(entry) -> str`에서 `get_meta(entry) -> dict`로
       확장. 기존 호출부 호환을 위해 `get_scope`도 여전히 수용.

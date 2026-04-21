@@ -18,5 +18,11 @@ tmp_merged_app.list
 tmp_preserve_app.json
 *.nvda-addon
 
+# 런타임 사용자 데이터 (실사용자 창 목록 — 개인 식별 방지)
+globalPlugins/multiTaskingWindowNotifier/app.list
+globalPlugins/multiTaskingWindowNotifier/app.json
+app.list
+app.json
+
 # 커버리지 산출물
 .coverage

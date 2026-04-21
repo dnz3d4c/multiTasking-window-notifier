@@ -291,26 +291,26 @@ def test_event_foreground_fires_app_scope_beep_for_unmapped_app(
 def test_event_foreground_window_match_takes_priority_over_app(
     plugin, beep_calls, record_calls
 ):
-    """KakaoTalk 같이 SCOPE_APP + SCOPE_WINDOW 혼합 등록 시 창 정확 매치 우선.
+    """메신저앱 계열처럼 SCOPE_APP + SCOPE_WINDOW 혼합 등록 시 창 정확 매치 우선.
 
     matcher의 우선순위는 window 정확 → window title-only → app_lookup.
     동일 fg.name이 window 키와 정확 일치하면 SCOPE_WINDOW 비프(2음).
     SCOPE_APP fallback은 발화 안 함.
     """
-    keys = ["kakaotalk", "kakaotalk|메인 채팅"]
-    scopes = {"kakaotalk": SCOPE_APP, "kakaotalk|메인 채팅": SCOPE_WINDOW}
+    keys = ["messenger", "messenger|메인 채팅"]
+    scopes = {"messenger": SCOPE_APP, "messenger|메인 채팅": SCOPE_WINDOW}
     store.save(plugin.appListFile, keys, scopes=scopes)
     plugin.appList = list(keys)
     plugin._rebuild_lookup()
 
     fg = _obj(wcn="EVA_Window_Dblclk", name="메인 채팅",
-              hwnd=0xA001, appName="kakaotalk")
+              hwnd=0xA001, appName="messenger")
 
     foregroundWatcher.handle(plugin, fg)
 
     assert len(beep_calls) == 1
     assert beep_calls[0][2] == SCOPE_WINDOW
-    assert record_calls == ["kakaotalk|메인 채팅"]
+    assert record_calls == ["messenger|메인 채팅"]
 
 
 def test_event_foreground_unregistered_app_no_beep(

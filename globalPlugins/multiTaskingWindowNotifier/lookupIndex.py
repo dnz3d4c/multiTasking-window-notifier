@@ -13,8 +13,9 @@
      찍혀 정확 매치가 깨질 때 fallback)
   3) 구형 entry(`|` 없음)는 자기 자신이 그대로 등록됨
   4) **aliases 필드(v8)** — scope=window/app 양쪽 entry의 alias 각각도
-     setdefault로 역매핑 추가. 카카오톡처럼 Alt+Tab title("링키지접근성")과
-     foreground title("카카오톡")이 다른 앱을 단일 entry로 매칭.
+     setdefault로 역매핑 추가. 어떤 앱은 Alt+Tab 오버레이가 다른 이름
+     ("대화창제목")으로 보이고 foreground title("메신저앱")은 또 다른 —
+     이런 비대칭 앱을 단일 entry로 매칭하기 위함.
   5) title/alias 충돌 시 먼저 등록된 idx 우선 (`setdefault`)
 
 - appLookup: scope=app entry용. appId → idx. windowLookup이 모두 미스일 때

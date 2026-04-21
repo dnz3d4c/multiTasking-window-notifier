@@ -53,8 +53,8 @@ def _new_meta(key: str, scope: str = SCOPE_WINDOW, aliases: list = None) -> dict
     tabBeepIdx는 scope=window에서 나중에 `_ensure_beep_assignments`가 채운다 —
     여기서는 필드를 만들지 않는다.
     aliases는 scope 무관 추가 필드로, title-only 역매핑에 쓰일 대체 제목 배열.
-    카카오톡처럼 Alt+Tab 오버레이 name과 foreground name이 다른 앱을 단일
-    entry로 매칭하기 위한 보조 키. 기본값은 빈 리스트.
+    Alt+Tab 오버레이 name과 foreground name이 다른 앱을 단일 entry로 매칭
+    하기 위한 보조 키. 기본값은 빈 리스트.
     """
     if scope == SCOPE_APP:
         appId, title = key, ""

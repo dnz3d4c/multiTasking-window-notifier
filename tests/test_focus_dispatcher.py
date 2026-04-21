@@ -109,7 +109,7 @@ def test_alt_tab_overlay_skipped_when_fg_not_shell_host(
     """
     plugin, calls = captured_match
     # Win+B 시나리오: obj.wcn은 InputSite, fg.wcn은 시스템 트레이/탐색기 등.
-    obj = _make_obj(wcn=ALT_TAB_OVERLAY_WCN, name="카카오톡", hwnd=0xD001, appName="explorer")
+    obj = _make_obj(wcn=ALT_TAB_OVERLAY_WCN, name="메신저앱", hwnd=0xD001, appName="explorer")
     fg = _make_obj(wcn="Shell_TrayWnd", name="작업 표시줄", hwnd=0xD000, appName="explorer")
     mock_api(fg)
 

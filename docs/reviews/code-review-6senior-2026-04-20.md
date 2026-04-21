@@ -373,7 +373,7 @@ decorator 하나로 추상화 가능.
 - [ ] app.json을 일부러 손상시킨 후 NVDA 재시작 → `ui.delayedMessage`로 "손상되어 빈 상태로 시작" 안내
 - [ ] 이후 NVDA+Shift+T로 새 항목 추가 → 정상 저장 + 손상 플래그 해소 (`state["corrupted"] = False`)
 
-### Scenario 7: alias 매칭 (카카오톡 케이스)
+### Scenario 7: alias 매칭 (메신저앱 케이스)
 
 - [ ] scope=window 항목에 alias 설정 → Alt+Tab 오버레이에서 alias 이름으로 매칭 시 **해당 entry의 앱 a음 + 탭 b음** 정상
 - [ ] scope=app 항목에 alias 설정 → Alt+Tab 오버레이에서 alias 이름으로 매칭 시 **단음** 정상

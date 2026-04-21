@@ -58,9 +58,9 @@ except Exception:
 def _prompt_for_alias(current_alias: str = "") -> str | None:
     """alias 입력 다이얼로그를 띄우고 결과 문자열 반환.
 
-    카카오톡처럼 Alt+Tab 오버레이 이름과 foreground 제목이 다른 앱을 단일
-    entry로 매칭하기 위한 "대체 제목" 입력창. 등록(NVDA+Shift+T) 흐름과
-    목록 다이얼로그 편집 흐름 양쪽에서 공유.
+    Alt+Tab 오버레이 이름과 foreground 제목이 다른 앱을 단일 entry로 매칭
+    하기 위한 "대체 제목" 입력창. 등록(NVDA+Shift+T) 흐름과 목록 다이얼로그
+    편집 흐름 양쪽에서 공유.
 
     Args:
         current_alias: 기본값으로 표시할 현재 alias. 등록 시에는 "".
@@ -76,7 +76,7 @@ def _prompt_for_alias(current_alias: str = "") -> str | None:
     try:
         prompt = _(
             "이 항목이 Alt+Tab 등 다른 경로에서 다른 이름으로 들리면 입력해요.\n"
-            "예: 카카오톡은 Alt+Tab에서 '링키지접근성' 같은 대화 이름으로 보여요.\n"
+            "예: 어떤 메신저앱은 Alt+Tab에서 '대화창제목' 같은 대화 이름으로 보여요.\n"
             "대체 제목이 없다면 빈 값으로 확인하면 돼요."
         )
         dlg = wx.TextEntryDialog(
