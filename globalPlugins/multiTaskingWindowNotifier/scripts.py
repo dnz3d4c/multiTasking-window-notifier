@@ -122,7 +122,7 @@ class ScriptsMixin(metaclass=ScriptableType):
     )
     def script_addCurrentWindowTitle(self, gesture=None):
         # 등록 소스는 foreground (메모장처럼 자식 컨트롤이 focus를 받아도 활성 탭 제목 취득).
-        fg, appId, title, key = get_current_window_info()
+        foreground, appId, title, key = get_current_window_info()
         if not title:
             ui.message(_("창 제목을 확인할 수 없어요."), speechPriority=speech.Spri.NEXT)
             return
@@ -264,7 +264,7 @@ class ScriptsMixin(metaclass=ScriptableType):
     )
     def script_removeCurrentWindowTitle(self, gesture=None):
         # 삭제 소스도 foreground (메모장 자식 컨트롤 케이스 대응).
-        fg, appId, title, key = get_current_window_info()
+        foreground, appId, title, key = get_current_window_info()
         if not title:
             ui.message(_("창 제목을 확인할 수 없어요."), speechPriority=speech.Spri.NEXT)
             return

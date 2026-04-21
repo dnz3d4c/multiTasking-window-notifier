@@ -103,7 +103,7 @@ def test_window_tab_beep_is_distinct_per_window(plugin, monkeypatch):
     plugin._match_and_beep("chrome", "Tab A")
     # 중복 가드 회피용 — 시간 + 시그니처 모두 리셋.
     plugin._last_matched_ts = 0.0
-    plugin._matcher.last_event_sig = None
+    plugin._matcher.last_event_signature = None
     plugin._match_and_beep("chrome", "Tab B")
 
     # Tab A / Tab B 모두 chrome 앱 비프 공유(app_idx=START),
@@ -149,21 +149,21 @@ def test_dedup_guard_resets_after_window(plugin, monkeypatch):
 
     실전에선 사용자가 다른 앱으로 전환했다가 돌아오는 시나리오가
     여기에 해당. 다른 매칭이 끼어들거나 비매칭 이벤트가 지나가면
-    last_event_sig가 자연 리셋된다. 단위 테스트에선 두 상태를 직접 리셋.
+    last_event_signature가 자연 리셋된다. 단위 테스트에선 두 상태를 직접 리셋.
     """
     _seed(plugin, [("chrome|YouTube", SCOPE_WINDOW)])
     calls = _capture_beeps(monkeypatch)
 
     plugin._match_and_beep("chrome", "YouTube")
     plugin._last_matched_ts = 0.0  # 시간 가드 리셋
-    plugin._matcher.last_event_sig = None  # 시그니처 가드 리셋 (복귀 시나리오 모사)
+    plugin._matcher.last_event_signature = None  # 시그니처 가드 리셋 (복귀 시나리오 모사)
     plugin._match_and_beep("chrome", "YouTube")
 
     assert len(calls) == 2
 
 
 def test_signature_dedup_blocks_same_hwnd_reentry(plugin, monkeypatch):
-    """같은 (appId, title, tab_sig) 재진입은 시간 가드 외에서도 시그니처로 억제.
+    """같은 (appId, title, tab_signature) 재진입은 시간 가드 외에서도 시그니처로 억제.
 
     메모장 한 탭에 머무는 동안 editor 분기가 0.1초 이상 간격으로 재발동하는
     상황 모사 — 동일 자식 컨트롤 hwnd라 sig가 동일.
@@ -171,18 +171,18 @@ def test_signature_dedup_blocks_same_hwnd_reentry(plugin, monkeypatch):
     _seed(plugin, [("notepad|제목 없음", SCOPE_WINDOW)])
     calls = _capture_beeps(monkeypatch)
 
-    plugin._match_and_beep("notepad", "제목 없음", tab_sig=0x1001)
+    plugin._match_and_beep("notepad", "제목 없음", tab_signature=0x1001)
     # 시간 가드는 풀어주지만 시그니처는 그대로 → 여전히 skip
     plugin._last_matched_ts = 0.0
-    plugin._match_and_beep("notepad", "제목 없음", tab_sig=0x1001)
+    plugin._match_and_beep("notepad", "제목 없음", tab_signature=0x1001)
     plugin._last_matched_ts = 0.0
-    plugin._match_and_beep("notepad", "제목 없음", tab_sig=0x1001)
+    plugin._match_and_beep("notepad", "제목 없음", tab_signature=0x1001)
 
     assert len(calls) == 1
 
 
 def test_signature_dedup_allows_different_hwnd_same_title(plugin, monkeypatch):
-    """같은 (appId, title)이라도 tab_sig(hwnd)가 다르면 매 전환마다 발화.
+    """같은 (appId, title)이라도 tab_signature(hwnd)가 다르면 매 전환마다 발화.
 
     메모장에서 "제목 없음" 탭 여러 개를 Ctrl+Tab으로 순회하는 시나리오 — 탭마다
     자식 컨트롤 hwnd가 다르므로 sig가 달라진다. 본 플랜의 핵심 회귀 방지 케이스.
@@ -192,11 +192,11 @@ def test_signature_dedup_allows_different_hwnd_same_title(plugin, monkeypatch):
     _seed(plugin, [("notepad|제목 없음", SCOPE_WINDOW)])
     calls = _capture_beeps(monkeypatch)
 
-    plugin._match_and_beep("notepad", "제목 없음", tab_sig=0x1001)
+    plugin._match_and_beep("notepad", "제목 없음", tab_signature=0x1001)
     plugin._last_matched_ts = 0.0  # 시간 가드 리셋 (시그니처 가드만 검증)
-    plugin._match_and_beep("notepad", "제목 없음", tab_sig=0x1002)
+    plugin._match_and_beep("notepad", "제목 없음", tab_signature=0x1002)
     plugin._last_matched_ts = 0.0
-    plugin._match_and_beep("notepad", "제목 없음", tab_sig=0x1003)
+    plugin._match_and_beep("notepad", "제목 없음", tab_signature=0x1003)
 
     # 같은 entry를 공유하므로 3회 모두 같은 (app_idx, tab_idx) — 다만 호출은 3회 실행.
     assert len(calls) == 3
@@ -281,30 +281,30 @@ def test_empty_appid_still_honors_title_reverse_mapping(plugin, monkeypatch):
     assert calls == [(BEEP_USABLE_START, BEEP_USABLE_START, SCOPE_WINDOW)]
 
 
-def test_unmatched_event_clears_sig_guard(plugin, monkeypatch):
-    """비매칭 이벤트(등록 안 된 창)가 지나가면 sig_guard가 리셋되어
+def test_unmatched_event_clears_signature_guard(plugin, monkeypatch):
+    """비매칭 이벤트(등록 안 된 창)가 지나가면 signature_guard가 리셋되어
     이후 동일 등록 창으로 복귀 시 비프가 재생된다.
 
     실전 시나리오: Firefox에서 YouTube 탭(등록) → 비등록 창/탭 경유 →
     YouTube 복귀. 중간 비등록 창에서는 matched_key=None으로 return되지만,
-    last_event_sig가 None으로 리셋되어 복귀 시 sig 동일성 비교가 어긋나
-    정상 통과한다. sig_guard stale 버그 회귀 방지의 핵심 케이스.
+    last_event_signature가 None으로 리셋되어 복귀 시 sig 동일성 비교가 어긋나
+    정상 통과한다. signature_guard stale 버그 회귀 방지의 핵심 케이스.
     """
     _seed(plugin, [("firefox|YouTube", SCOPE_WINDOW)])
     calls = _capture_beeps(monkeypatch)
 
     # 1. 등록 창 매칭 → sig 기록
-    plugin._match_and_beep("firefox", "YouTube", tab_sig=265170)
-    assert plugin._matcher.last_event_sig is not None
+    plugin._match_and_beep("firefox", "YouTube", tab_signature=265170)
+    assert plugin._matcher.last_event_signature is not None
     assert len(calls) == 1
 
     # 2. 비등록 창 경유 → matched_key=None 분기 진입, sig 리셋
     plugin._last_matched_ts = 0.0
-    plugin._match_and_beep("unknown_app", "no_such_title", tab_sig=99999)
-    assert plugin._matcher.last_event_sig is None
+    plugin._match_and_beep("unknown_app", "no_such_title", tab_signature=99999)
+    assert plugin._matcher.last_event_signature is None
     assert len(calls) == 1  # 비등록이므로 비프는 안 늘어남
 
-    # 3. 동일 등록 창으로 복귀 → sig_guard 통과 → 비프 재생
+    # 3. 동일 등록 창으로 복귀 → signature_guard 통과 → 비프 재생
     plugin._last_matched_ts = 0.0
-    plugin._match_and_beep("firefox", "YouTube", tab_sig=265170)
+    plugin._match_and_beep("firefox", "YouTube", tab_signature=265170)
     assert len(calls) == 2

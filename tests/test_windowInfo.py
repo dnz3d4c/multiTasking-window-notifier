@@ -20,8 +20,8 @@ from globalPlugins.multiTaskingWindowNotifier import windowInfo
 @pytest.fixture
 def fake_fg(monkeypatch):
     """`api.getForegroundObject`를 임의 반환값으로 바꿔주는 헬퍼 fixture."""
-    def _set(fg):
-        monkeypatch.setattr(sys.modules["api"], "getForegroundObject", lambda: fg)
+    def _set(foreground):
+        monkeypatch.setattr(sys.modules["api"], "getForegroundObject", lambda: foreground)
     return _set
 
 
@@ -31,33 +31,33 @@ def test_foreground_none_returns_all_none(fake_fg):
 
 
 def test_empty_name_returns_all_none(fake_fg):
-    fg = MagicMock(name="fg")
-    fg.name = ""
-    fake_fg(fg)
+    foreground = MagicMock(name="foreground")
+    foreground.name = ""
+    fake_fg(foreground)
     assert windowInfo.get_current_window_info() == (None, None, None, None)
 
 
 def test_dirty_marker_only_returns_all_none(fake_fg):
     """선두 마커(`*`)만 남아 normalize가 빈 문자열을 돌려주면 조기 반환."""
-    fg = MagicMock(name="fg")
-    fg.name = "*"
-    fake_fg(fg)
+    foreground = MagicMock(name="foreground")
+    foreground.name = "*"
+    fake_fg(foreground)
     assert windowInfo.get_current_window_info() == (None, None, None, None)
 
 
 def test_normal_title_normalized_and_composite_key(fake_fg, monkeypatch):
     """꼬리 앱명 서픽스가 제거된 title로 appId|title 복합키가 구성된다."""
-    fg = MagicMock(name="fg")
-    fg.name = "제목 없음 - 메모장"
-    fg.windowClassName = "Notepad"
-    fake_fg(fg)
+    foreground = MagicMock(name="foreground")
+    foreground.name = "제목 없음 - 메모장"
+    foreground.windowClassName = "Notepad"
+    fake_fg(foreground)
 
     # getAppId가 appModuleHandler 경유 → 스텁 appModule을 붙여준다.
     app_module = types.SimpleNamespace(appName="notepad")
-    fg.appModule = app_module
+    foreground.appModule = app_module
 
     result_fg, appId, title, key = windowInfo.get_current_window_info()
-    assert result_fg is fg
+    assert result_fg is foreground
     assert appId == "notepad"
     assert title == "제목 없음"
     assert key == "notepad|제목 없음"

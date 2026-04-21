@@ -79,7 +79,7 @@ class GlobalPlugin(ScriptsMixin, globalPluginHandler.GlobalPlugin):
         self._pending_switches = 0
         self._last_flush_at = time.monotonic()
         # 매칭 + 비프 재생 + 시그니처 dedup 캡슐화. dedup 상태는
-        # Matcher.last_event_sig가 직접 소유(외부에서는 plugin._matcher로 접근).
+        # Matcher.last_event_signature가 직접 소유(외부에서는 plugin._matcher로 접근).
         self._matcher = Matcher(self)
 
         # 손상된 app.json을 만났을 때 한 번만 사용자에게 안내.
@@ -168,9 +168,9 @@ class GlobalPlugin(ScriptsMixin, globalPluginHandler.GlobalPlugin):
 
     # ---- matcher 위임 ----
 
-    def _match_and_beep(self, appId, title, tab_sig=0):
+    def _match_and_beep(self, appId, title, tab_signature=0):
         """공통 매칭 루틴. 실제 로직은 Matcher.match_and_beep."""
-        self._matcher.match_and_beep(appId, title, tab_sig=tab_sig)
+        self._matcher.match_and_beep(appId, title, tab_signature=tab_signature)
 
     # -------- 이벤트 훅 --------
 

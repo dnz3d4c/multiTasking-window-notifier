@@ -8,10 +8,10 @@ matcher를 거쳐 `store.record_switch`와 `beepPlayer.play_beep`까지 한 번�
 
 시나리오:
     1. Alt+Tab 오버레이 → 창 매치 비프 + record_switch
-    2. Ctrl+Tab editor 분기 → 창 매치 + tab_sig 전파
+    2. Ctrl+Tab editor 분기 → 창 매치 + tab_signature 전파
     3. Ctrl+Tab overlay 분기 (Notepad++ MRU 형태)
     4. event_nameChange 확정 전환 → 비프
-    5. 연속 동일 전환 dedup (같은 event_sig면 skip)
+    5. 연속 동일 전환 dedup (같은 event_signature면 skip)
     6. 자식 컨트롤 재진입 (hwnd 동일) → 동일 sig로 2회 째 skip
 
 beepPlayer/store.record_switch는 모듈 속성 monkeypatch로 감지한다 — matcher가
@@ -99,8 +99,8 @@ def record_calls(monkeypatch):
 @pytest.fixture
 def quiet_api(monkeypatch):
     """getForegroundObject 주입 헬퍼."""
-    state = {"fg": None}
-    monkeypatch.setattr(eventRouter.api, "getForegroundObject", lambda: state["fg"])
+    state = {"foreground": None}
+    monkeypatch.setattr(eventRouter.api, "getForegroundObject", lambda: state["foreground"])
     return state
 
 
@@ -111,9 +111,9 @@ def _silence_debug(monkeypatch):
     monkeypatch.setattr(eventRouter.tabClasses, "is_editor_class", lambda a, w: False)
 
 
-def _obj(wcn="", name="", hwnd=0x1000, appName=""):
+def _obj(window_class_name="", name="", hwnd=0x1000, appName=""):
     o = MagicMock()
-    o.windowClassName = wcn
+    o.windowClassName = window_class_name
     o.name = name
     o.windowHandle = hwnd
     o.appModule = MagicMock()
@@ -125,9 +125,9 @@ def test_alt_tab_overlay_fires_beep_and_record(
     seeded_plugin, beep_calls, record_calls, quiet_api
 ):
     """Alt+Tab 오버레이 → 창 매치 → 비프 + record_switch(notepad|제목 없음)."""
-    obj = _obj(wcn=ALT_TAB_OVERLAY_WCN, name="제목 없음 - 메모장", hwnd=0xAAA)
-    fg = _obj(wcn=ALT_TAB_HOST_FG_WCN, name="작업 전환", hwnd=0xBBB)
-    quiet_api["fg"] = fg
+    obj = _obj(window_class_name=ALT_TAB_OVERLAY_WCN, name="제목 없음 - 메모장", hwnd=0xAAA)
+    foreground = _obj(window_class_name=ALT_TAB_HOST_FG_WCN, name="작업 전환", hwnd=0xBBB)
+    quiet_api["foreground"] = foreground
 
     eventRouter.dispatch_focus(seeded_plugin, obj)
 
@@ -138,13 +138,13 @@ def test_alt_tab_overlay_fires_beep_and_record(
 def test_editor_branch_fires_beep_with_child_hwnd(
     seeded_plugin, beep_calls, record_calls, quiet_api, monkeypatch
 ):
-    """Ctrl+Tab editor 분기 — fg.name을 제목으로, 자식 hwnd를 tab_sig로."""
-    obj = _obj(wcn="RichEditD2DPT", hwnd=0xE001, appName="notepad")
-    fg = _obj(wcn="Notepad", name="제목 없음 - 메모장", hwnd=0xF001, appName="notepad")
-    quiet_api["fg"] = fg
+    """Ctrl+Tab editor 분기 — foreground.name을 제목으로, 자식 hwnd를 tab_signature로."""
+    obj = _obj(window_class_name="RichEditD2DPT", hwnd=0xE001, appName="notepad")
+    foreground = _obj(window_class_name="Notepad", name="제목 없음 - 메모장", hwnd=0xF001, appName="notepad")
+    quiet_api["foreground"] = foreground
     monkeypatch.setattr(
         eventRouter.tabClasses, "is_editor_class",
-        lambda appId, wcn: appId == "notepad" and wcn == "RichEditD2DPT",
+        lambda appId, window_class_name: appId == "notepad" and window_class_name == "RichEditD2DPT",
     )
 
     eventRouter.dispatch_focus(seeded_plugin, obj)
@@ -156,13 +156,13 @@ def test_editor_branch_fires_beep_with_child_hwnd(
 def test_app_overlay_branch_fires_beep(
     seeded_plugin, beep_calls, record_calls, quiet_api, monkeypatch
 ):
-    """Notepad++ MRU 오버레이: fg_wcn이 overlay 목록이면 obj.name을 제목으로."""
-    obj = _obj(wcn="SysListView32", name="main.cpp", hwnd=0xC001, appName="notepad++")
-    fg = _obj(wcn="#32770", name="MRU", hwnd=0xC000, appName="notepad++")
-    quiet_api["fg"] = fg
+    """Notepad++ MRU 오버레이: foreground_class_name이 overlay 목록이면 obj.name을 제목으로."""
+    obj = _obj(window_class_name="SysListView32", name="main.cpp", hwnd=0xC001, appName="notepad++")
+    foreground = _obj(window_class_name="#32770", name="MRU", hwnd=0xC000, appName="notepad++")
+    quiet_api["foreground"] = foreground
     monkeypatch.setattr(
         eventRouter.tabClasses, "is_overlay_class",
-        lambda appId, wcn: appId == "notepad++" and wcn == "#32770",
+        lambda appId, window_class_name: appId == "notepad++" and window_class_name == "#32770",
     )
 
     eventRouter.dispatch_focus(seeded_plugin, obj)
@@ -175,11 +175,11 @@ def test_name_change_fires_beep_on_confirmed_tab(
     seeded_plugin, beep_calls, record_calls, monkeypatch
 ):
     """event_nameChange로 title이 바뀌어 들어오면 매칭 + 비프."""
-    fg = _obj(wcn="Chrome_WidgetWin_1", name="YouTube - Chrome", hwnd=0x7777, appName="chrome")
+    foreground = _obj(window_class_name="Chrome_WidgetWin_1", name="YouTube - Chrome", hwnd=0x7777, appName="chrome")
     # 최상위 foreground와 nameChange의 obj가 같은 상황(확정 탭 전환)
-    monkeypatch.setattr(eventRouter.api, "getForegroundObject", lambda: fg)
+    monkeypatch.setattr(eventRouter.api, "getForegroundObject", lambda: foreground)
 
-    eventRouter.handle_name_change(seeded_plugin, fg)
+    eventRouter.handle_name_change(seeded_plugin, foreground)
 
     assert len(beep_calls) == 1
     assert record_calls == ["chrome|YouTube"]
@@ -188,10 +188,10 @@ def test_name_change_fires_beep_on_confirmed_tab(
 def test_consecutive_identical_events_are_deduped(
     seeded_plugin, beep_calls, record_calls, quiet_api
 ):
-    """같은 (appId, title, tab_sig) 연속 발생 → 첫 이벤트만 울리고 두 번째 skip."""
-    obj = _obj(wcn=ALT_TAB_OVERLAY_WCN, name="제목 없음 - 메모장", hwnd=0xAAA)
-    fg = _obj(wcn=ALT_TAB_HOST_FG_WCN, name="작업 전환", hwnd=0xBBB)
-    quiet_api["fg"] = fg
+    """같은 (appId, title, tab_signature) 연속 발생 → 첫 이벤트만 울리고 두 번째 skip."""
+    obj = _obj(window_class_name=ALT_TAB_OVERLAY_WCN, name="제목 없음 - 메모장", hwnd=0xAAA)
+    foreground = _obj(window_class_name=ALT_TAB_HOST_FG_WCN, name="작업 전환", hwnd=0xBBB)
+    quiet_api["foreground"] = foreground
 
     eventRouter.dispatch_focus(seeded_plugin, obj)
     eventRouter.dispatch_focus(seeded_plugin, obj)
@@ -216,12 +216,12 @@ def test_app_scope_fallback_beep(
     plugin.appList = list(keys)
     plugin._rebuild_lookup()
 
-    fg = _obj(wcn="Chrome_WidgetWin_1", name="Some page - Chrome",
+    foreground = _obj(window_class_name="Chrome_WidgetWin_1", name="Some page - Chrome",
               hwnd=0x9999, appName="chrome")
     import sys as _sys
-    _sys.modules["api"].getForegroundObject = lambda: fg
+    _sys.modules["api"].getForegroundObject = lambda: foreground
 
-    eventRouter.handle_name_change(plugin, fg)
+    eventRouter.handle_name_change(plugin, foreground)
 
     # scope=app: (app_idx, None, SCOPE_APP) 단음
     assert len(beep_calls) == 1
@@ -236,14 +236,14 @@ def test_child_control_reentry_does_not_double_beep(
     """editor 분기 활성 상태에서 같은 hwnd로 포커스가 두 번 들어와도 1회만.
 
     자식 컨트롤을 클릭하거나 포커스 이동해도 sig(appId, title, hwnd)가 동일이면
-    dedup으로 skip — Matcher.last_event_sig 가드.
+    dedup으로 skip — Matcher.last_event_signature 가드.
     """
-    obj = _obj(wcn="RichEditD2DPT", hwnd=0xE001, appName="notepad")
-    fg = _obj(wcn="Notepad", name="제목 없음 - 메모장", hwnd=0xF001, appName="notepad")
-    quiet_api["fg"] = fg
+    obj = _obj(window_class_name="RichEditD2DPT", hwnd=0xE001, appName="notepad")
+    foreground = _obj(window_class_name="Notepad", name="제목 없음 - 메모장", hwnd=0xF001, appName="notepad")
+    quiet_api["foreground"] = foreground
     monkeypatch.setattr(
         eventRouter.tabClasses, "is_editor_class",
-        lambda appId, wcn: appId == "notepad" and wcn == "RichEditD2DPT",
+        lambda appId, window_class_name: appId == "notepad" and window_class_name == "RichEditD2DPT",
     )
 
     eventRouter.dispatch_focus(seeded_plugin, obj)
@@ -255,7 +255,7 @@ def test_child_control_reentry_does_not_double_beep(
 
 # ---------------- Phase 7: event_foreground 회귀 그물 ----------------
 # eventRouter.handle_foreground은 NVDA가 event_foreground를 발화한 시점에 호출되며
-# obj는 새 foreground 본체다. 같은 fg hwnd 내부 포커스 이동에는 NVDA가 발화
+# obj는 새 foreground 본체다. 같은 foreground hwnd 내부 포커스 이동에는 NVDA가 발화
 # 자체를 안 하므로 dedup은 NVDA 책임. 우리 모듈은 호출만 들어오면 무조건
 # matcher로 위임한다 — 이 점을 테스트 시 가정.
 
@@ -275,10 +275,10 @@ def test_event_foreground_fires_app_scope_beep_for_unmapped_app(
     plugin.appList = list(keys)
     plugin._rebuild_lookup()
 
-    fg = _obj(wcn="Chrome_WidgetWin_1", name="Spotify Premium",
+    foreground = _obj(window_class_name="Chrome_WidgetWin_1", name="Spotify Premium",
               hwnd=0x9001, appName="spotify")
 
-    eventRouter.handle_foreground(plugin, fg)
+    eventRouter.handle_foreground(plugin, foreground)
 
     assert len(beep_calls) == 1
     assert beep_calls[0][1] is None  # tab_idx=None (단음)
@@ -292,7 +292,7 @@ def test_event_foreground_window_match_takes_priority_over_app(
     """메신저앱 계열처럼 SCOPE_APP + SCOPE_WINDOW 혼합 등록 시 창 정확 매치 우선.
 
     matcher의 우선순위는 window 정확 → window title-only → app_lookup.
-    동일 fg.name이 window 키와 정확 일치하면 SCOPE_WINDOW 비프(2음).
+    동일 foreground.name이 window 키와 정확 일치하면 SCOPE_WINDOW 비프(2음).
     SCOPE_APP fallback은 발화 안 함.
     """
     keys = ["messenger", "messenger|메인 채팅"]
@@ -301,10 +301,10 @@ def test_event_foreground_window_match_takes_priority_over_app(
     plugin.appList = list(keys)
     plugin._rebuild_lookup()
 
-    fg = _obj(wcn="EVA_Window_Dblclk", name="메인 채팅",
+    foreground = _obj(window_class_name="EVA_Window_Dblclk", name="메인 채팅",
               hwnd=0xA001, appName="messenger")
 
-    eventRouter.handle_foreground(plugin, fg)
+    eventRouter.handle_foreground(plugin, foreground)
 
     assert len(beep_calls) == 1
     assert beep_calls[0][2] == SCOPE_WINDOW
@@ -315,10 +315,10 @@ def test_event_foreground_unregistered_app_no_beep(
     seeded_plugin, beep_calls, record_calls
 ):
     """등록 안 된 앱으로 foreground 전환 시 무음. matcher miss로 자연 종료."""
-    fg = _obj(wcn="UnknownApp", name="Some Random Window",
+    foreground = _obj(window_class_name="UnknownApp", name="Some Random Window",
               hwnd=0xB001, appName="unknownapp")
 
-    eventRouter.handle_foreground(seeded_plugin, fg)
+    eventRouter.handle_foreground(seeded_plugin, foreground)
 
     assert beep_calls == []
     assert record_calls == []
@@ -330,7 +330,7 @@ def test_alt_tab_overlay_then_foreground_both_fire(
     """Alt+Tab 도중 분기 1(미리듣기) + 릴리스 후 event_foreground(본 비프) 양쪽 발화.
 
     두 이벤트는 서로 다른 sig — 분기 1은 (appId='', title=norm, hwnd=overlay),
-    handle_foreground는 (appId=실제, title=norm, hwnd=fg) — 이라 sig dedup이
+    handle_foreground는 (appId=실제, title=norm, hwnd=foreground) — 이라 sig dedup이
     흡수하지 않고 의도된 2회로 분리된다(탐색 단계 + 확정 단계).
     """
     keys = ["spotify"]
@@ -346,15 +346,15 @@ def test_alt_tab_overlay_then_foreground_both_fire(
     plugin._rebuild_lookup()
 
     # 1) Alt+Tab 오버레이 미리듣기 (분기 1)
-    overlay = _obj(wcn=ALT_TAB_OVERLAY_WCN, name="Spotify Premium",
+    overlay = _obj(window_class_name=ALT_TAB_OVERLAY_WCN, name="Spotify Premium",
                    hwnd=0xCAFE, appName="explorer")
-    overlay_fg = _obj(wcn=ALT_TAB_HOST_FG_WCN, name="작업 전환",
+    overlay_fg = _obj(window_class_name=ALT_TAB_HOST_FG_WCN, name="작업 전환",
                       hwnd=0xBEEF, appName="explorer")
-    quiet_api["fg"] = overlay_fg
+    quiet_api["foreground"] = overlay_fg
     eventRouter.dispatch_focus(plugin, overlay)
 
     # 2) Alt 릴리스 후 실제 foreground 전환 (handle_foreground)
-    real_fg = _obj(wcn="Chrome_WidgetWin_1", name="Spotify Premium",
+    real_fg = _obj(window_class_name="Chrome_WidgetWin_1", name="Spotify Premium",
                    hwnd=0x9001, appName="spotify")
     eventRouter.handle_foreground(plugin, real_fg)
 

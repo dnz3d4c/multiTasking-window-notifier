@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """appIdentity.normalize_title 엣지 케이스.
 
-Alt+Tab 오버레이(obj.name), editor fg.name, MRU obj.name 세 경로가 같은
+Alt+Tab 오버레이(obj.name), editor foreground.name, MRU obj.name 세 경로가 같은
 형태로 떨어지도록 꼬리 " - 앱명" 서픽스와 선두 dirty 마커(`*`, `●`, `◌`, `•`)를
 제거한다. 이 테스트는 각 분기가 독립적으로 동작함을 단언하고, 매칭 소스가
 같은 규칙을 거치기 때문에 허용 가능한 엣지(정상 타이틀에 ' - ' 포함)를 명시한다.

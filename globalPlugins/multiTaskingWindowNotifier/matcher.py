@@ -3,7 +3,7 @@
 
 """매칭 + 비프 재생 + 시그니처 dedup + 룩업 인덱스.
 
-event_gainFocus / event_nameChange가 (appId, title, tab_sig)를 뽑아내면
+event_gainFocus / event_nameChange가 (appId, title, tab_signature)를 뽑아내면
 Matcher.match_and_beep으로 넘겨 LookupIndex 조회 → 비프 재생까지 처리한다.
 핫 패스에서 매 호출 파일 I/O는 피하고, 카운트는 GlobalPlugin의 flush
 디바운스 메서드(_notify_switch / _maybe_flush)로 위임.
@@ -111,36 +111,36 @@ _SUPPRESS_REPEAT_SEC = 0.3
 class Matcher:
     """매칭 로직과 비프 재생을 캡슐화.
 
-    dedup 상태(`last_event_sig`)는 인스턴스 속성으로 보유한다. 테스트/복귀
-    시나리오에서는 `matcher.last_event_sig = None` 직접 대입으로 초기화.
+    dedup 상태(`last_event_signature`)는 인스턴스 속성으로 보유한다. 테스트/복귀
+    시나리오에서는 `matcher.last_event_signature = None` 직접 대입으로 초기화.
 
     두 dedup 정책의 교차 시나리오 (의도된 동작):
 
-        * **A → B → A (짧은 왕복)** — B 매칭 순간 last_event_sig=B, `_last_matched_key`=B.
+        * **A → B → A (짧은 왕복)** — B 매칭 순간 last_event_signature=B, `_last_matched_key`=B.
           A 복귀 시 sig가 달라 통과 + is_repeat=False(키 다름) → 일반 재생.
 
-        * **A → 미스 창 → A 복귀** — 미스 매칭에서 last_event_sig=None으로 리셋
-          (matcher.py 내 matched_key is None 분기 참조). A 복귀 시 sig_guard 통과.
+        * **A → 미스 창 → A 복귀** — 미스 매칭에서 last_event_signature=None으로 리셋
+          (matcher.py 내 matched_key is None 분기 참조). A 복귀 시 signature_guard 통과.
           그러나 `_last_matched_key`는 A 유지(의도적 미리셋) → is_repeat=True로
           판정되어 pentatonic 프리셋의 suppressRepeat/octaveVariation이 적용됨.
           사용자 관점의 "같은 창 빠른 복귀"로 취급하는 의도된 UX.
 
-        * **같은 탭 자식 컨트롤 재진입** — (appId, title, tab_sig) 동일 →
-          last_event_sig 동등으로 sig_guard skip. 재생 없음.
+        * **같은 탭 자식 컨트롤 재진입** — (appId, title, tab_signature) 동일 →
+          last_event_signature 동등으로 signature_guard skip. 재생 없음.
 
-    sig_guard는 "같은 이벤트 중복 흡수"가 목적이고, _last_matched_key는 "사용자
+    signature_guard는 "같은 이벤트 중복 흡수"가 목적이고, _last_matched_key는 "사용자
     행동 기반 반복 판정"이 목적이라 리셋 정책이 일부러 다르다. 단순화하면
     pentatonic 프리셋 UX가 후퇴함(리뷰 2026-04-20 C2 결정).
     """
 
     def __init__(self, plugin):
         self._plugin = plugin
-        # 시그니처 기반 dedup — (appId, title, tab_sig)가 연속으로 같으면 skip.
-        # 확정 탭 전환은 title 또는 tab_sig(hwnd)가 바뀌므로 자연 통과하고,
+        # 시그니처 기반 dedup — (appId, title, tab_signature)가 연속으로 같으면 skip.
+        # 확정 탭 전환은 title 또는 tab_signature(hwnd)가 바뀌므로 자연 통과하고,
         # 같은 탭 자식 컨트롤 재진입 같은 이벤트 중복 폭주만 흡수한다.
-        self.last_event_sig = None
-        # Phase 2: 반복 억제/옥타브 변주용 최근 매칭 상태. sig_guard와 별도 —
-        # sig_guard는 이벤트 식별자(tab_sig 포함)로 "같은 이벤트 중복 흡수",
+        self.last_event_signature = None
+        # Phase 2: 반복 억제/옥타브 변주용 최근 매칭 상태. signature_guard와 별도 —
+        # signature_guard는 이벤트 식별자(tab_signature 포함)로 "같은 이벤트 중복 흡수",
         # 여기는 "같은 매칭 key 재진입"이라는 사용자 행동 기반.
         self._last_matched_key = None
         self._last_match_time = 0.0
@@ -185,7 +185,7 @@ class Matcher:
             tab_idx = 0
         return app_idx, tab_idx
 
-    def match_and_beep(self, appId, title, tab_sig=0):
+    def match_and_beep(self, appId, title, tab_signature=0):
         """공통 매칭 루틴. 이벤트 훅(event_gainFocus / event_nameChange)이
         매칭 소스를 결정한 뒤 호출.
 
@@ -199,7 +199,7 @@ class Matcher:
             4. 미스 → no-op
 
         Args:
-            tab_sig: 탭/창 구분용 이벤트 식별자(보통 obj.windowHandle). 시그니처
+            tab_signature: 탭/창 구분용 이벤트 식별자(보통 obj.windowHandle). 시그니처
                 dedup sig에 포함되어 같은 (appId, title)이라도 다른 탭이면 통과
                 시킨다. 0은 hwnd 미확보 상태 — 탭 구분 없는 기존 동작과 동치.
         """
@@ -230,27 +230,27 @@ class Matcher:
 
         if matched_key is None:
             # 비매칭 이벤트도 sig 연속성을 끊는다. 등록 안 된 창을 경유한 뒤
-            # 등록 창으로 복귀할 때 직전 sig가 stale로 남아 sig_guard에 오 skip
+            # 등록 창으로 복귀할 때 직전 sig가 stale로 남아 signature_guard에 오 skip
             # 되는 버그 방지. 자식 컨트롤 재진입은 matched_key 확정 경로에서만
             # 발생하므로 이 리셋의 영향권 밖.
             #
             # Phase 2 참고: `_last_matched_key`는 의도적으로 리셋하지 않는다. "A →
             # 미스 창 → A 복귀" 시 두 번째 A 진입도 사용자 관점에서 "같은 창 빠른
-            # 복귀"이므로 suppressRepeat/octaveVariation의 관심 영역. sig_guard와
+            # 복귀"이므로 suppressRepeat/octaveVariation의 관심 영역. signature_guard와
             # 역할이 다르므로 둘의 리셋 정책도 독립.
-            self.last_event_sig = None
+            self.last_event_signature = None
             return
 
-        # 시그니처 dedup: (appId, title, tab_sig) 동일이면 skip.
+        # 시그니처 dedup: (appId, title, tab_signature) 동일이면 skip.
         # 같은 탭의 자식 컨트롤 재진입(hwnd 동일)만 차단. 다른 창으로의 이동은
         # 위 matched_key=None 분기에서 sig가 None으로 리셋되므로, 등록 여부와
         # 무관하게 복귀 시 sig 동일성 비교가 어긋나 자연 통과한다.
-        event_sig = (appId, title, tab_sig)
-        if event_sig == self.last_event_sig:
+        event_signature = (appId, title, tab_signature)
+        if event_signature == self.last_event_signature:
             if settings.get("debugLogging"):
-                log.info(f"mtwn: DBG sig_guard skip sig={event_sig!r}")
+                log.info(f"mtwn: DBG signature_guard skip sig={event_signature!r}")
             return
-        self.last_event_sig = event_sig
+        self.last_event_signature = event_signature
 
         app_idx, tab_idx = self._resolve_beep_pair(matched_key, scope, appId)
 

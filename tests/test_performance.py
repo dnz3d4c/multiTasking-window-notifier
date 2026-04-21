@@ -69,9 +69,9 @@ def ready_plugin(monkeypatch, tmp_path):
     return plugin
 
 
-def _obj(wcn, name, hwnd, appName):
+def _obj(window_class_name, name, hwnd, appName):
     o = MagicMock()
-    o.windowClassName = wcn
+    o.windowClassName = window_class_name
     o.name = name
     o.windowHandle = hwnd
     o.appModule = MagicMock()
@@ -82,21 +82,21 @@ def _obj(wcn, name, hwnd, appName):
 def test_event_gain_focus_average_under_threshold(ready_plugin, monkeypatch):
     """100회 반복 평균 처리시간이 AVG_THRESHOLD_MS 미만.
 
-    매 iteration마다 Matcher.last_event_sig를 None으로 리셋해 dedup으로 건너
+    매 iteration마다 Matcher.last_event_signature를 None으로 리셋해 dedup으로 건너
     뛰는 빠른 경로가 평균을 과소평가하지 않도록 한다.
     """
     obj = _obj(ALT_TAB_OVERLAY_WCN, "제목 없음 - 메모장", 0xAAA, "chrome")
-    fg = _obj(ALT_TAB_HOST_FG_WCN, "작업 전환", 0xBBB, "explorer")
-    monkeypatch.setattr(eventRouter.api, "getForegroundObject", lambda: fg)
+    foreground = _obj(ALT_TAB_HOST_FG_WCN, "작업 전환", 0xBBB, "explorer")
+    monkeypatch.setattr(eventRouter.api, "getForegroundObject", lambda: foreground)
 
     # Warmup: 최초 호출의 JIT/import 비용 배제
     for _ in range(5):
-        ready_plugin._matcher.last_event_sig = None
+        ready_plugin._matcher.last_event_signature = None
         eventRouter.dispatch_focus(ready_plugin, obj)
 
     latencies_ms = []
     for _ in range(ITERATIONS):
-        ready_plugin._matcher.last_event_sig = None
+        ready_plugin._matcher.last_event_signature = None
         t0 = time.perf_counter()
         eventRouter.dispatch_focus(ready_plugin, obj)
         latencies_ms.append((time.perf_counter() - t0) * 1000.0)
@@ -128,14 +128,14 @@ def test_match_and_beep_hot_path_under_threshold(ready_plugin):
     측정한다. 등록 항목 2개 + window_lookup 히트 케이스.
     """
     for _ in range(5):
-        ready_plugin._matcher.last_event_sig = None
-        ready_plugin._match_and_beep("notepad", "제목 없음", tab_sig=0xAAA)
+        ready_plugin._matcher.last_event_signature = None
+        ready_plugin._match_and_beep("notepad", "제목 없음", tab_signature=0xAAA)
 
     latencies_ms = []
     for _ in range(ITERATIONS):
-        ready_plugin._matcher.last_event_sig = None
+        ready_plugin._matcher.last_event_signature = None
         t0 = time.perf_counter()
-        ready_plugin._match_and_beep("notepad", "제목 없음", tab_sig=0xAAA)
+        ready_plugin._match_and_beep("notepad", "제목 없음", tab_signature=0xAAA)
         latencies_ms.append((time.perf_counter() - t0) * 1000.0)
 
     avg = statistics.mean(latencies_ms)

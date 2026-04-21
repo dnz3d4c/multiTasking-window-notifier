@@ -30,20 +30,20 @@ def get_current_window_info():
     """포커스된 창의 정보 추출.
 
     Returns:
-        tuple: (fg, appId, title, key). 추출 실패 시 (None, None, None, None).
+        tuple: (foreground, appId, title, key). 추출 실패 시 (None, None, None, None).
 
     예외는 모두 내부에서 삼키고 None 튜플로 반환한다. 호출부(스크립트)에서
     사용자 안내를 처리하므로 본 함수는 `log`로만 진단 정보를 남긴다.
     """
     try:
-        fg = api.getForegroundObject()
+        foreground = api.getForegroundObject()
     except Exception:
         log.exception("mtwn: get_current_window_info getForegroundObject failed")
         return None, None, None, None
-    if fg is None:
+    if foreground is None:
         return None, None, None, None
     try:
-        raw_title = (getattr(fg, "name", "") or "").strip()
+        raw_title = (getattr(foreground, "name", "") or "").strip()
     except Exception:
         log.exception("mtwn: get_current_window_info read foreground name failed")
         return None, None, None, None
@@ -55,6 +55,6 @@ def get_current_window_info():
     title = normalize_title(raw_title)
     if not title:
         return None, None, None, None
-    appId = getAppId(fg)
+    appId = getAppId(foreground)
     key = makeKey(appId, title)
-    return fg, appId, title, key
+    return foreground, appId, title, key

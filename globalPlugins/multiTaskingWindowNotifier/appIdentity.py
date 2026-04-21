@@ -78,7 +78,7 @@ def _strip_dirty_markers(s: str) -> str:
     """1단계: 선두 dirty 마커(`*`, `●`, `◌`, `•`)를 순차 제거.
 
     Notepad++의 '*', VS Code의 '●' 등 "저장 안 된 변경사항" 표시. editor focus
-    시 fg.name에는 있는데 MRU 오버레이의 obj.name에는 없는 경우가 있어 제거
+    시 foreground.name에는 있는데 MRU 오버레이의 obj.name에는 없는 경우가 있어 제거
     없으면 key 불일치(실측 확인).
     """
     while s and s[0] in _LEADING_DIRTY:

@@ -50,10 +50,10 @@ SCOPE_APP = "app"
 ALT_TAB_OVERLAY_WCN = "Windows.UI.Input.InputSite.WindowClass"
 
 # Alt+Tab 오버레이의 **포그라운드(호스트) windowClassName**.
-# obj.wcn(Windows.UI.Input.InputSite.WindowClass)은 UWP InputSite 공용이라
+# obj.window_class_name(Windows.UI.Input.InputSite.WindowClass)은 UWP InputSite 공용이라
 # Win+B 숨김 아이콘·시스템 트레이·알림 센터 등 다른 목록형 UI와도 겹친다.
-# 따라서 Alt+Tab 진입 판정은 (obj.wcn == ALT_TAB_OVERLAY_WCN AND
-# fg.wcn == ALT_TAB_HOST_FG_WCN) 두 축 AND로 묶어 오탐을 배제한다.
+# 따라서 Alt+Tab 진입 판정은 (obj.window_class_name == ALT_TAB_OVERLAY_WCN AND
+# foreground.window_class_name == ALT_TAB_HOST_FG_WCN) 두 축 AND로 묶어 오탐을 배제한다.
 # Windows 11 Xaml Shell 고정값. 로케일 독립.
 ALT_TAB_HOST_FG_WCN = "XamlExplorerHostIslandWindow"
 
