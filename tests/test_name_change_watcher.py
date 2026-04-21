@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""nameChangeWatcher.handle 단위 테스트.
+"""eventRouter.handle_name_change 단위 테스트.
 
 Ctrl+Tab 확정 전환 시 foreground title이 바뀌는 시나리오(Firefox, Notepad++)
 에서만 매칭 위임이 발생해야 한다. 자식 요소의 nameChange(obj.name != fg.name)는
@@ -12,7 +12,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from globalPlugins.multiTaskingWindowNotifier import nameChangeWatcher
+from globalPlugins.multiTaskingWindowNotifier import eventRouter
 
 
 def _make_obj(name="", hwnd=0x1000, appName=""):
@@ -42,13 +42,13 @@ def mock_api(monkeypatch):
     def _set_fg(fg):
         state["fg"] = fg
 
-    monkeypatch.setattr(nameChangeWatcher.api, "getForegroundObject", lambda: state["fg"])
+    monkeypatch.setattr(eventRouter.api, "getForegroundObject", lambda: state["fg"])
     return _set_fg
 
 
 @pytest.fixture
 def debug_off(monkeypatch):
-    monkeypatch.setattr(nameChangeWatcher.settings, "get", lambda key: False)
+    monkeypatch.setattr(eventRouter.settings, "get", lambda key: False)
 
 
 def test_none_obj_is_noop(captured_match, mock_api, debug_off):
@@ -56,7 +56,7 @@ def test_none_obj_is_noop(captured_match, mock_api, debug_off):
     plugin, calls = captured_match
     mock_api(_make_obj(name="anything"))
 
-    nameChangeWatcher.handle(plugin, None)
+    eventRouter.handle_name_change(plugin, None)
 
     assert calls == []
 
@@ -66,7 +66,7 @@ def test_none_foreground_is_noop(captured_match, mock_api, debug_off):
     plugin, calls = captured_match
     mock_api(None)
 
-    nameChangeWatcher.handle(plugin, _make_obj(name="something"))
+    eventRouter.handle_name_change(plugin, _make_obj(name="something"))
 
     assert calls == []
 
@@ -77,7 +77,7 @@ def test_obj_name_matches_fg_name_triggers_match(captured_match, mock_api, debug
     fg = _make_obj(name="main.cpp - Notepad++", hwnd=0xC100, appName="notepad++")
     mock_api(fg)
 
-    nameChangeWatcher.handle(plugin, fg)
+    eventRouter.handle_name_change(plugin, fg)
 
     assert len(calls) == 1
     appId, title, tab_sig = calls[0]
@@ -95,7 +95,7 @@ def test_obj_name_differs_from_fg_name_is_skipped(captured_match, mock_api, debu
     child = _make_obj(name="Some Link Label", hwnd=0xF200, appName="firefox")
     mock_api(fg)
 
-    nameChangeWatcher.handle(plugin, child)
+    eventRouter.handle_name_change(plugin, child)
 
     assert calls == []
 
@@ -111,7 +111,7 @@ def test_empty_fg_name_is_skipped(captured_match, mock_api, debug_off):
     fg = _make_obj(name="", hwnd=0xA100, appName="chrome")
     mock_api(fg)
 
-    nameChangeWatcher.handle(plugin, fg)
+    eventRouter.handle_name_change(plugin, fg)
 
     assert calls == []
 
@@ -122,7 +122,7 @@ def test_whitespace_only_name_is_skipped(captured_match, mock_api, debug_off):
     fg = _make_obj(name="\t  \n", hwnd=0xA100, appName="chrome")
     mock_api(fg)
 
-    nameChangeWatcher.handle(plugin, fg)
+    eventRouter.handle_name_change(plugin, fg)
 
     assert calls == []
 
@@ -133,7 +133,7 @@ def test_tab_sig_uses_obj_hwnd(captured_match, mock_api, debug_off):
     fg = _make_obj(name="YouTube - Firefox", hwnd=0x7777, appName="firefox")
     mock_api(fg)
 
-    nameChangeWatcher.handle(plugin, fg)
+    eventRouter.handle_name_change(plugin, fg)
 
     assert len(calls) == 1
     _, _, tab_sig = calls[0]
@@ -157,7 +157,7 @@ def test_invalid_window_handle_is_cut(captured_match, mock_api, debug_off):
     type(fg).windowHandle = property(lambda self: (_ for _ in ()).throw(RuntimeError("handle gone")))
     mock_api(fg)
 
-    nameChangeWatcher.handle(plugin, fg)
+    eventRouter.handle_name_change(plugin, fg)
 
     assert calls == []
 
@@ -175,7 +175,7 @@ def test_menu_item_obj_is_cut_before_name_compare(captured_match, mock_api, debu
     menu_item = _make_obj(name="YouTube - Mozilla Firefox", hwnd=0x1001, appName="firefox")
     mock_api(fg)
 
-    nameChangeWatcher.handle(plugin, menu_item)
+    eventRouter.handle_name_change(plugin, menu_item)
 
     assert calls == []  # 조기 컷으로 matcher 미호출
 
@@ -186,7 +186,7 @@ def test_fg_identity_allows_match(captured_match, mock_api, debug_off):
     fg = _make_obj(name="document.txt - Notepad++", hwnd=0xC200, appName="notepad++")
     mock_api(fg)
 
-    nameChangeWatcher.handle(plugin, fg)
+    eventRouter.handle_name_change(plugin, fg)
 
     assert len(calls) == 1
     appId, _, tab_sig = calls[0]

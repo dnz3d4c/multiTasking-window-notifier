@@ -156,7 +156,7 @@ class Matcher:
             scope = meta.get("scope", SCOPE_WINDOW)
         elif appId and appId in app_lookup:
             # appId="" → Alt+Tab 오버레이 후보처럼 obj.appId가 실제 앱이 아닌 케이스.
-            # focusDispatcher가 신뢰 불가 표시로 빈 문자열을 넘기므로 app_lookup skip.
+            # eventRouter.dispatch_focus가 신뢰 불가 표시로 빈 문자열을 넘기므로 app_lookup skip.
             matched_key, scope = appId, SCOPE_APP
 
         if matched_key is None:

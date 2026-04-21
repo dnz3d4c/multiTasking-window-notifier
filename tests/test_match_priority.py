@@ -255,7 +255,7 @@ def test_empty_appid_skips_app_lookup(plugin, monkeypatch):
     """appId=""로 들어오면 app_lookup 조회가 스킵되어 오탐이 차단된다.
 
     Alt+Tab 오버레이 후보의 obj.appId는 항상 오버레이 호스트('explorer')라
-    focusDispatcher가 빈 문자열로 Matcher에 내린다. 사용자가 explorer를
+    eventRouter.dispatch_focus가 빈 문자열로 Matcher에 내린다. 사용자가 explorer를
     SCOPE_APP으로 등록했어도, 등록 안 된 후보 창의 title만 들고 오면
     어떤 매칭도 이뤄지지 않아야 한다. 본 Phase의 핵심 회귀 방지.
     """

@@ -21,9 +21,7 @@ from .switchFlusher import FlushScheduler
 from .lookupIndex import LookupIndex
 from .matcher import Matcher
 from .scripts import ScriptsMixin
-from . import focusDispatcher
-from . import nameChangeWatcher
-from . import foregroundWatcher
+from . import eventRouter
 
 # 번역 초기화(선택)
 try:
@@ -40,7 +38,8 @@ class GlobalPlugin(ScriptsMixin, globalPluginHandler.GlobalPlugin):
 
     책임: 설정 스키마 등록 / 저장소 로드 / 이벤트 훅 진입점 / 모듈 결합.
     단축키 4종과 보조 헬퍼는 ScriptsMixin이 담당 (scripts.py).
-    이벤트 훅 본문은 focusDispatcher / nameChangeWatcher에 위임.
+    이벤트 훅 본문은 eventRouter에 위임 (handle_foreground / handle_name_change /
+    dispatch_focus 3-way).
     """
 
     def __init__(self):
@@ -144,26 +143,26 @@ class GlobalPlugin(ScriptsMixin, globalPluginHandler.GlobalPlugin):
     # -------- 이벤트 훅 --------
 
     def event_gainFocus(self, obj, nextHandler):
-        """모든 포커스 전환에서 호출. 3분기 매칭은 focusDispatcher에 위임.
+        """모든 포커스 전환에서 호출. 3분기 매칭은 eventRouter.dispatch_focus에 위임.
 
         try/except + finally로 nextHandler() 보장은 여기 유지 — 애드온 예외가
         NVDA 이벤트 체인을 끊지 않도록 진입점 레이어에서 흡수.
         """
         try:
-            focusDispatcher.dispatch(self, obj)
+            eventRouter.dispatch_focus(self, obj)
         except Exception:
             log.exception("mtwn: event_gainFocus failed")
         finally:
             nextHandler()
 
     def event_nameChange(self, obj, nextHandler):
-        """탭 확정 전환 감지. 로직은 nameChangeWatcher.handle에 위임.
+        """탭 확정 전환 감지. 로직은 eventRouter.handle_name_change에 위임.
 
         try/except + finally로 nextHandler() 보장은 진입점 레이어에서 유지 —
         애드온 예외가 NVDA 이벤트 체인을 끊지 않도록.
         """
         try:
-            nameChangeWatcher.handle(self, obj)
+            eventRouter.handle_name_change(self, obj)
         except Exception:
             log.exception("mtwn: event_nameChange failed")
         finally:
@@ -178,7 +177,7 @@ class GlobalPlugin(ScriptsMixin, globalPluginHandler.GlobalPlugin):
         try/except + finally로 nextHandler() 보장은 다른 훅과 동일 패턴.
         """
         try:
-            foregroundWatcher.handle(self, obj)
+            eventRouter.handle_foreground(self, obj)
         except Exception:
             log.exception("mtwn: event_foreground failed")
         finally:

@@ -3,7 +3,7 @@
 
 """앱별 탭 컨트롤 wcn 매핑.
 
-focusDispatcher의 분기 판정에 쓰이는 **상수 테이블**이다. 과거에는
+eventRouter.dispatch_focus의 분기 판정에 쓰이는 **상수 테이블**이다. 과거에는
 `tabClasses.json` 파일로 외재화해 사용자가 NVDA+Shift+T 등록 시 editor wcn을
 자동 학습할 수 있게 했으나, 실사용에서 학습 경로가 한 번도 쓰이지 않아 JSON
 I/O를 제거하고 상수 조회로 되돌렸다. 새 앱(예: VSCode)의 wcn 추가는 소스

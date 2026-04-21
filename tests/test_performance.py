@@ -22,7 +22,7 @@ import pytest
 from configobj import ConfigObj
 
 from globalPlugins.multiTaskingWindowNotifier import (
-    focusDispatcher,
+    eventRouter,
     store,
 )
 from globalPlugins.multiTaskingWindowNotifier.constants import (
@@ -62,9 +62,9 @@ def ready_plugin(monkeypatch, tmp_path):
     # 비프/레코드/디버그 로그 전부 no-op
     monkeypatch.setattr(beepPlayer, "play_beep", lambda *a, **kw: None)
     monkeypatch.setattr(store, "record_switch", lambda *a, **kw: None)
-    monkeypatch.setattr(focusDispatcher.settings, "get", lambda key: False)
-    monkeypatch.setattr(focusDispatcher.tabClasses, "is_overlay_class", lambda a, w: False)
-    monkeypatch.setattr(focusDispatcher.tabClasses, "is_editor_class", lambda a, w: False)
+    monkeypatch.setattr(eventRouter.settings, "get", lambda key: False)
+    monkeypatch.setattr(eventRouter.tabClasses, "is_overlay_class", lambda a, w: False)
+    monkeypatch.setattr(eventRouter.tabClasses, "is_editor_class", lambda a, w: False)
 
     return plugin
 
@@ -87,18 +87,18 @@ def test_event_gain_focus_average_under_threshold(ready_plugin, monkeypatch):
     """
     obj = _obj(ALT_TAB_OVERLAY_WCN, "제목 없음 - 메모장", 0xAAA, "chrome")
     fg = _obj(ALT_TAB_HOST_FG_WCN, "작업 전환", 0xBBB, "explorer")
-    monkeypatch.setattr(focusDispatcher.api, "getForegroundObject", lambda: fg)
+    monkeypatch.setattr(eventRouter.api, "getForegroundObject", lambda: fg)
 
     # Warmup: 최초 호출의 JIT/import 비용 배제
     for _ in range(5):
         ready_plugin._matcher.last_event_sig = None
-        focusDispatcher.dispatch(ready_plugin, obj)
+        eventRouter.dispatch_focus(ready_plugin, obj)
 
     latencies_ms = []
     for _ in range(ITERATIONS):
         ready_plugin._matcher.last_event_sig = None
         t0 = time.perf_counter()
-        focusDispatcher.dispatch(ready_plugin, obj)
+        eventRouter.dispatch_focus(ready_plugin, obj)
         latencies_ms.append((time.perf_counter() - t0) * 1000.0)
 
     avg = statistics.mean(latencies_ms)

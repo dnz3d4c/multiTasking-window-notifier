@@ -66,7 +66,7 @@ def test_alias_hit_on_app_scope_entry_plays_single_note(plugin, monkeypatch):
     calls = _capture_beeps(monkeypatch)
 
     # Alt+Tab 오버레이 시뮬레이션: match_appId="" + alias title.
-    # focusDispatcher가 Alt+Tab 분기에서 match_appId=""를 내리는 구조를 그대로 재현.
+    # eventRouter.dispatch_focus가 Alt+Tab 분기에서 match_appId=""를 내리는 구조를 그대로 재현.
     plugin._match_and_beep("", "대화창제목", tab_sig=0x2001)
 
     assert len(calls) == 1, f"단일 호출 기대, 실제: {calls}"

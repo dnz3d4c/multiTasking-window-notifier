@@ -218,7 +218,7 @@ class ScriptsMixin(metaclass=ScriptableType):
             return
 
         # alias 적용: 입력이 있으면 normalize_title로 꼬리 서픽스를 벗긴 뒤 저장.
-        # 매칭 경로(foreground/focusDispatcher/nameChange)는 모두 정규화된 title을
+        # 매칭 경로(eventRouter의 3-way handle_foreground/dispatch_focus/handle_name_change)는 모두 정규화된 title을
         # 쓰므로 저장 시에도 같은 형태로 통일해야 역매핑이 히트한다.
         normalized_alias = normalize_title(alias) if alias else ""
         if normalized_alias:
