@@ -3,32 +3,32 @@
 
 """프리셋 데이터 단일 소유자 모듈 (Phase 7.1 신설).
 
-여러 모듈(constants/synthEngine/beepPlayer/settings/settingsPanel)에 산재했던
-프리셋 관련 로직 — dict 정의, freqs 빌더, 부팅 불변식 assert, 폴백 경고 —
-을 한 모듈로 응집한다.
+여러 모듈(constants/beepPlayer/settings/settingsPanel)에 산재했던 프리셋 관련
+로직 — dict 정의, freqs 빌더, 부팅 불변식 assert, 폴백 경고 — 을 한 모듈로
+응집한다.
 
 원칙:
     - 프리셋 데이터 소유자는 이 모듈뿐. 다른 모듈은 공개 API만 호출.
-    - 의존 방향: presets.py → constants.py 만 허용. settings/beepPlayer/
-      synthEngine을 import하지 않는다(역전 금지).
+    - 의존 방향: presets.py → constants.py 만 허용. settings/beepPlayer를
+      import하지 않는다(역전 금지).
     - 공개 API: PRESETS, CLASSIC_PRESET_ID, get_preset_or_classic.
 
 프리셋 dict 포맷:
     id                  — 내부 식별자(settings.beepPreset에 저장)
     nameLabel           — UI 노출 이름 (raw str; UI 레이어가 _() 번역)
-    type                — "tonal" | "hybrid"
+    type                — "tonal"
     slotCount           — 슬롯 수. 재생 시점 effective_idx = stored_idx % slotCount
     previewSlots        — "미리듣기(&P)" 버튼이 재생할 대표 슬롯 인덱스 2개
     descriptionLabel    — ListBox focus 시 표시되는 짧은 설명 (raw str)
     freqs               — slotCount 길이의 정수 주파수(Hz) 리스트
     suppressRepeat      — 최근 0.3초 내 같은 키 재매칭 시 tab음 생략
     octaveVariation     — 같은 앱 재진입 시 tab idx ±7 clip
-    waveform            — (hybrid 전용) nvwave+synthEngine.render_wav 경로 진입 트리거
 
 과거 철회된 프리셋(drum_kit/lazer_pack/eight_bit_jump/daily_life/humor_pack/
-arcade_pop/coin_dash/glass_step)은 이 모듈에 존재하지 않는다. 사용자 저장값에
-그 id가 남아있어도 `get_preset_or_classic`의 미지 id 폴백 경로가 classic으로
-흡수해 재생 자체는 정상 동작한다.
+arcade_pop/coin_dash/glass_step/soft_retro)은 이 모듈에 존재하지 않는다. 사용자
+저장값에 그 id가 남아있어도 `get_preset_or_classic`의 미지 id 폴백 경로가
+classic으로 흡수해 재생 자체는 정상 동작한다. Phase 11에서 hybrid 타입(waveform
+필드 경유 synthEngine 합성 경로)은 전면 제거됐다 — `tones.beep` 단일 경로.
 """
 
 from logHandler import log
@@ -93,8 +93,8 @@ _A_MINOR_FREQS = [
 
 
 # ---------------------------------------------------------------------------
-# 프리셋 dict — Phase 8 기준 5개
-# (classic/pentatonic/fifths + soft_retro + moss_bell)
+# 프리셋 dict — Phase 11 기준 4개 (classic/pentatonic/fifths/moss_bell)
+# 모두 tonal 타입, tones.beep 경로.
 # ---------------------------------------------------------------------------
 
 PRESETS = {
@@ -133,24 +133,6 @@ PRESETS = {
         "previewSlots": (0, 7),  # C3, C4
         "descriptionLabel": "완전5도 진행(C-G-D-A-E-B-F) × 5옥타브. 팡파레 느낌.",
         "freqs": _build_fifths_freqs(),
-        "suppressRepeat": False,
-        "octaveVariation": False,
-    },
-    # Phase 3 hybrid — nvwave + synthEngine.render_wav 경로. `waveform` 키
-    # 존재가 신 경로 진입 트리거. freqs는 BEEP_TABLE(C3~B7)을 공유해 음정 구조를
-    # classic과 동일하게 유지하되 음색만 달라진다.
-    # Phase 8: pulse50/pulse25 기반 프리셋(arcade_pop/coin_dash)은 날카로움 피드백
-    # 으로 제거. soft_retro(triangle)만 유지 — triangle은 배음 감쇠가 1/n²로
-    # 빠른 부드러운 파형.
-    "soft_retro": {
-        "id": "soft_retro",
-        "nameLabel": "Soft Retro",
-        "type": "hybrid",
-        "slotCount": 35,
-        "previewSlots": (0, 14),
-        "descriptionLabel": "삼각파. 부드럽고 따뜻한 8비트 배경음 느낌.",
-        "freqs": BEEP_TABLE,
-        "waveform": "triangle",
         "suppressRepeat": False,
         "octaveVariation": False,
     },

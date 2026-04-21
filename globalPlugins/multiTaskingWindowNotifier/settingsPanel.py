@@ -39,15 +39,11 @@ except Exception:
 # SpinCtrl의 min/max와 onSave의 clamp 양쪽에서 공용으로 쓰는 상수.
 DURATION_MIN, DURATION_MAX = 20, 500
 GAP_MIN, GAP_MAX = 0, 200
-# Phase 6: beepVolume 슬라이더 범위. CONFSPEC과 동일.
-VOLUME_MIN, VOLUME_MAX = 50, 150
 
 # 프리셋 type → 사용자 노출 카테고리 레이블. ListBox 항목 접두사로 사용.
-# Phase 7.4: percussive/atonal 라인업(synthSpecs 5종)이 철회되면서 엔트리 축소.
-# 현재 프리셋은 전부 tonal/hybrid이며, 신규 프리셋도 이 두 type만 허용.
+# Phase 11: hybrid 타입(synthEngine 경유 파형 합성) 전면 제거로 tonal만 남음.
 _TYPE_CATEGORY_LABELS = {
     "tonal": _("음계"),
-    "hybrid": _("혼합"),
 }
 
 
@@ -71,7 +67,7 @@ def _ordered_preset_ids():
     """ListBox 항목 순서. PRESETS의 dict 삽입 순서를 그대로 쓴다.
 
     Python 3.7+는 dict 순서 보존이 보장되고 `presets.PRESETS`는 사용자 경험에
-    맞춰 classic→pentatonic→fifths→soft_retro→moss_bell 순으로 정의돼 있다.
+    맞춰 classic→pentatonic→fifths→moss_bell 순으로 정의돼 있다.
     따라서 list(PRESETS) 만으로 표시 순서가 일관된다.
     """
     return list(PRESETS.keys())
@@ -153,18 +149,6 @@ class MultiTaskingSettingsPanel(SettingsPanel):
         )
         sHelper.addItem(gapHelp)
 
-        # Phase 6: 비프 볼륨 슬라이더. 50~150% 범위로 hybrid 프리셋(waveform 메타
-        # 지정 → nvwave 경로) 볼륨을 사용자가 직접 조정. classic/pentatonic/fifths
-        # (tones.beep 경로)는 NVDA 내부 볼륨 체계를 쓰므로 영향 받지 않는다.
-        # Translators: 비프 볼륨 슬라이더 라벨. 단위는 %. 범위 50~150.
-        self.volumeSlider = sHelper.addLabeledControl(
-            _("비프 볼륨 (%):"),
-            wx.Slider,
-            minValue=VOLUME_MIN, maxValue=VOLUME_MAX,
-            value=_clamp(conf["beepVolume"], VOLUME_MIN, VOLUME_MAX),
-            style=wx.SL_HORIZONTAL | wx.SL_VALUE_LABEL,
-        )
-
         # Translators: 진단 로그 체크박스 라벨. 평상시엔 끄고, 문제 추적 시에만 사용.
         self.debugLoggingCheck = sHelper.addItem(
             wx.CheckBox(self, label=_("진단 로그 기록 (문제 추적용)"))
@@ -187,12 +171,10 @@ class MultiTaskingSettingsPanel(SettingsPanel):
         # 적용이라 쓰기에서는 자동 보호가 없다.
         duration = _clamp(self.durationSpin.GetValue(), DURATION_MIN, DURATION_MAX)
         gap_ms = _clamp(self.gapSpin.GetValue(), GAP_MIN, GAP_MAX)
-        volume = _clamp(self.volumeSlider.GetValue(), VOLUME_MIN, VOLUME_MAX)
 
         conf = config.conf[ADDON_NAME]
         conf["beepDuration"] = duration
         conf["beepGapMs"] = gap_ms
-        conf["beepVolume"] = volume
         conf["debugLogging"] = self.debugLoggingCheck.IsChecked()
         # 프리셋 선택 저장. ListBox 미선택(-1) 방어 — 사용자가 전체 해제한 경우
         # classic 폴백(체감 회귀 없음).
@@ -223,17 +205,16 @@ class MultiTaskingSettingsPanel(SettingsPanel):
         self._presetDescription.GetParent().Layout()
 
     def _onPreviewClicked(self, event):
-        """현재 선택 프리셋의 previewSlots 2음을 현재 SpinCtrl/Slider 값으로 재생.
+        """현재 선택 프리셋의 previewSlots 2음을 현재 SpinCtrl 값으로 재생.
 
-        패널을 열고 duration/gap/volume을 수정한 상태(아직 onSave 전)에서도 조정한
-        값 그대로 들려줘야 "원하는 타이밍/볼륨인지" 확인 가능하므로 현재 위젯 값을
-        직접 전달한다. settings(config.conf) 값을 읽으면 저장된 이전 값으로 재생돼
+        패널을 열고 duration/gap을 수정한 상태(아직 onSave 전)에서도 조정한 값
+        그대로 들려줘야 "원하는 타이밍인지" 확인 가능하므로 현재 위젯 값을 직접
+        전달한다. settings(config.conf) 값을 읽으면 저장된 이전 값으로 재생돼
         사용자 의도 벗어남.
         """
         duration = _clamp(self.durationSpin.GetValue(), DURATION_MIN, DURATION_MAX)
         gap_ms = _clamp(self.gapSpin.GetValue(), GAP_MIN, GAP_MAX)
-        volume = _clamp(self.volumeSlider.GetValue(), VOLUME_MIN, VOLUME_MAX)
-        beepPlayer.play_preview(self._current_preset_id(), duration, gap_ms, volume)
+        beepPlayer.play_preview(self._current_preset_id(), duration, gap_ms)
 
     def _onDefaultClicked(self, event):
         """프리셋 선택을 Classic Tones로 되돌린다. 즉시 저장되진 않고 onSave에서 반영."""

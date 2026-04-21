@@ -32,10 +32,6 @@ CONFSPEC = {
     "beepGapMs": "integer(default=100, min=0, max=200)",
     "debugLogging": "boolean(default=False)",
     "beepPreset": 'string(default="classic")',
-    # Phase 6: nvwave 경로(hybrid 프리셋) 볼륨 슬라이더. 50~150% 범위로 clipping
-    # 위험 최소화. classic/pentatonic/fifths(tones.beep 경로)는 NVDA 내부 볼륨
-    # 체계를 따르므로 영향 없음.
-    "beepVolume": "integer(default=100, min=50, max=150)",
 }
 
 # 과거 버전 confspec에 있었으나 의미가 사라져 제거된 키 목록.
@@ -46,11 +42,14 @@ CONFSPEC = {
 #                          끝나서 사용자가 줄일 실용 이유 없음. MAX_ITEMS 상수만으로
 #                          하드 상한 충분.
 # - humorPackWarningShown: humor_pack 옵트인 프리셋 1회성 경고 플래그. Phase 7.4
-#                          에서 humor_pack 자체가 철회되며 의미 소멸. 사용자
-#                          config에 잔존할 수 있어 여기서 정리.
+#                          에서 humor_pack 자체가 철회되며 의미 소멸.
+# - beepVolume           : Phase 6에서 도입했던 nvwave 경로(hybrid 프리셋) 볼륨
+#                          슬라이더. Phase 11에서 synthEngine/hybrid 전면 제거로
+#                          의미 소멸. tones.beep은 NVDA 전역 볼륨 체계를 따른다.
 # register()에서 1회성으로 nvda.ini 잔재를 정리한다(다음 NVDA 종료 시 디스크 반영).
 _OBSOLETE_KEYS = (
     "beepVolumeLeft", "beepVolumeRight", "maxItems", "humorPackWarningShown",
+    "beepVolume",
 )
 
 

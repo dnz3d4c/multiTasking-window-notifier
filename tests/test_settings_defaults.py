@@ -100,8 +100,8 @@ def test_get_fallback_when_key_missing(real_config):
 
 
 def test_register_purges_obsolete_keys(real_config):
-    """과거 버전 confspec에 있던 키(beepVolumeLeft/Right/maxItems)가 nvda.ini에
-    잔재로 남아 있으면 register() 1회 호출로 제거되어야 한다.
+    """과거 버전 confspec에 있던 키(beepVolumeLeft/Right/maxItems/beepVolume)가
+    nvda.ini에 잔재로 남아 있으면 register() 1회 호출로 제거되어야 한다.
 
     configobj가 spec 외 키를 자동 무시하긴 해도 nvda.ini 파일 자체에는 그대로
     남아 지원 인력/사용자가 봤을 때 혼란을 준다. 명시 obsolete 리스트만 제거하고
@@ -116,16 +116,18 @@ def test_register_purges_obsolete_keys(real_config):
         "beepVolumeLeft": 50,
         "beepVolumeRight": 50,
         "maxItems": 64,
+        "beepVolume": 120,  # Phase 11: synthEngine 제거로 의미 소멸
         "someUnknownKey": "preserve-me",
     }
 
     settings.register()
 
     section = real_config[ADDON_KEY]
-    # obsolete 3종 모두 제거.
+    # obsolete 전부 제거.
     assert "beepVolumeLeft" not in section
     assert "beepVolumeRight" not in section
     assert "maxItems" not in section
+    assert "beepVolume" not in section
     # 살아있는 사용자 값 보존 + 빠진 spec 키는 default 주입.
     assert section["beepDuration"] == 77
     assert section["beepGapMs"] == 100
@@ -143,4 +145,5 @@ def test_register_purge_is_idempotent(real_config):
     section = real_config[ADDON_KEY]
     assert "beepVolumeLeft" not in section
     assert "maxItems" not in section
+    assert "beepVolume" not in section
     assert section["beepDuration"] == 50
