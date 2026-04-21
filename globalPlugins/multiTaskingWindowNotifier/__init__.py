@@ -8,6 +8,7 @@
 #   ※ 위 두 항목은 아직 미구현. 구조 영향 적음. 추후 필요 시 추가.
 
 import os
+import time
 import ui
 import gui
 import globalPluginHandler
@@ -15,11 +16,10 @@ from logHandler import log
 
 from . import store
 from . import settings
+from .constants import FLUSH_EVERY_N_DEFAULT, FLUSH_INTERVAL_SEC_DEFAULT
 from .windowInfo import config_addon_dir
 from .settingsPanel import MultiTaskingSettingsPanel
-from .switchFlusher import FlushScheduler
-from .lookupIndex import LookupIndex
-from .matcher import Matcher
+from .matcher import LookupIndex, Matcher
 from .scripts import ScriptsMixin
 from . import eventRouter
 
@@ -73,8 +73,11 @@ class GlobalPlugin(ScriptsMixin, globalPluginHandler.GlobalPlugin):
         # GlobalPlugin은 property로 read-only 노출(기존 테스트 호환).
         self._lookup = LookupIndex(meta_provider=self._meta_for)
         self._rebuild_lookup()
-        # 전환 카운트 디바운스 저장: switchFlusher가 카운터/타이머 상태 캡슐화.
-        self._flush_scheduler = FlushScheduler(store.flush, self.appListFile)
+        # 전환 카운트 디바운스 상태: 매칭 성공마다 _pending++, 임계치 넘으면 flush.
+        # Phase 12-4에서 switchFlusher.FlushScheduler 클래스를 해체해 GlobalPlugin
+        # 메서드·필드로 직접 흡수. Matcher가 flush를 몰라도 되도록 레이어 분리 유지.
+        self._pending_switches = 0
+        self._last_flush_at = time.monotonic()
         # 매칭 + 비프 재생 + 시그니처 dedup 캡슐화. dedup 상태는
         # Matcher.last_event_sig가 직접 소유(외부에서는 plugin._matcher로 접근).
         self._matcher = Matcher(self)
@@ -133,6 +136,35 @@ class GlobalPlugin(ScriptsMixin, globalPluginHandler.GlobalPlugin):
     def _rebuild_lookup(self):
         """appList 변경 시 lookup 재구성. 실제 로직은 LookupIndex.rebuild."""
         self._lookup.rebuild(self.appList)
+
+    # ---- 디바운스 flush (Phase 12-4에서 FlushScheduler 해체 후 이관) ----
+
+    def _notify_switch(self):
+        """매칭 성공 1회 = 미저장 전환 카운트 +1."""
+        self._pending_switches += 1
+
+    def _maybe_flush(self):
+        """임계치(FLUSH_EVERY_N_DEFAULT/FLUSH_INTERVAL_SEC_DEFAULT) 충족 시 디스크 반영.
+
+        실패해도 이벤트 체인을 막지 않도록 예외 흡수. 시간 기준/횟수 기준 중
+        하나만 충족해도 flush가 수행된다.
+        """
+        now = time.monotonic()
+        if (
+            self._pending_switches >= FLUSH_EVERY_N_DEFAULT
+            or (now - self._last_flush_at) >= FLUSH_INTERVAL_SEC_DEFAULT
+        ):
+            try:
+                store.flush(self.appListFile)
+            except Exception:
+                log.exception("mtwn: switch flush failed")
+            self._last_flush_at = now
+            self._pending_switches = 0
+
+    def _reset_flush_schedule(self):
+        """reload 후 카운터/타이머 초기화."""
+        self._last_flush_at = time.monotonic()
+        self._pending_switches = 0
 
     # ---- matcher 위임 ----
 

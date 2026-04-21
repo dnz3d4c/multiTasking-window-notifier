@@ -14,7 +14,7 @@ ScriptsMixin이 읽는 GlobalPlugin 속성:
     - self.appList / self.appListFile
     - self.windowLookup / self.appLookup (LookupIndex 경유 property)
     - self._rebuild_lookup()
-    - self._flush_scheduler (FlushScheduler, reload 시 reset)
+    - self._reset_flush_schedule() (reload 시 카운터/타이머 초기화)
     - self._meta_for(entry)  (listDialog에 scope 콜백으로 전달)
 
 역방향(__init__.py → scripts.py) 의존은 ScriptsMixin 상속 한 줄이 전부.
@@ -309,7 +309,7 @@ class ScriptsMixin(metaclass=ScriptableType):
         items = store.reload(self.appListFile)
         self.appList = items
         self._rebuild_lookup()
-        self._flush_scheduler.reset()
+        self._reset_flush_schedule()
         ui.message(
             _("목록을 다시 불러왔어요. 지금 {count}개예요.").format(count=len(items)),
             speechPriority=speech.Spri.NEXT,
