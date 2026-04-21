@@ -421,6 +421,10 @@ class ScriptsMixin(metaclass=ScriptableType):
         aliases 기반이라 순서 변경의 부작용은 없지만, idx 기반 동작(디버그 로그
         등)을 위해 rebuild는 유지.
 
+        음성 안내는 호출부(listDialog._move_selected)가 SetSelection+SetFocus로
+        이동한 항목을 다시 선택해 NVDA가 자동 낭독하게 하므로 여기서는 별도
+        ui.message를 쏘지 않는다("위로 이동했어요" + 항목 낭독 중복 방지).
+
         Returns:
             True: 이동+저장 성공.
             False: 경계/미존재/디스크 실패. listDialog가 wx.MessageBox 담당.
@@ -429,9 +433,5 @@ class ScriptsMixin(metaclass=ScriptableType):
             return False
         self.appList = store.load(self.appListFile)
         self._rebuild_lookup()
-        ui.message(
-            _("위로 이동했어요.") if direction == "up" else _("아래로 이동했어요."),
-            speechPriority=speech.Spri.NEXT,
-        )
         log.info(f"mtwn: dialog move entry={entry!r} dir={direction}")
         return True
