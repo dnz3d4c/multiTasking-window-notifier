@@ -1,8 +1,9 @@
 # -*- coding: utf-8 -*-
-"""store/ 서브패키지 스캐폴딩 smoke 테스트.
+"""store 모듈 공개 표면 smoke 테스트.
 
-Phase 3.1: 빈 패키지가 import 가능한지만 확인한다. 후속 커밋(3-2~3-7)에서
-실제 모듈/함수가 이관되면 이 파일에 추가 smoke 단언을 덧붙인다.
+Phase 12-2에서 `store/` 서브패키지(4파일)를 단일 `store.py`로 평탄화.
+외부 import 경로 `from . import store`는 불변이므로 본 테스트가 검증하는
+공개 표면(10개 __all__ + reset_cache 테스트 유틸)도 그대로 유지된다.
 """
 
 from __future__ import annotations
@@ -59,7 +60,7 @@ def test_reset_cache_accessible_but_private():
     from globalPlugins.multiTaskingWindowNotifier import store
 
     assert hasattr(store, "reset_cache"), (
-        "reset_cache는 명시 접근(store.reset_cache / from store.core import ...)용으로 유지해야 한다"
+        "reset_cache는 명시 접근(store.reset_cache / from .store import reset_cache)용으로 유지해야 한다"
     )
     assert "reset_cache" not in store.__all__, (
         "reset_cache는 공개 API 아님 — __all__에서 제거된 상태여야 한다"
@@ -70,15 +71,13 @@ def test_prune_stale_removed():
     """Phase R3: prune_stale 함수 본체 + 재export 완전 제거.
 
     Phase 8(창 닫기 알림) 착수 시 신규 설계로 재작성. 과거 구현은 git log.
+    Phase 12-2에서 서브패키지가 단일 파일로 평탄화됐으므로 store 모듈 단독
+    검증만 남긴다(core 서브모듈은 더 이상 존재하지 않음).
     """
     from globalPlugins.multiTaskingWindowNotifier import store
-    from globalPlugins.multiTaskingWindowNotifier.store import core
 
     assert not hasattr(store, "prune_stale"), (
         "prune_stale 재export가 남아 있음 — Phase R3에서 완전 제거되어야 함"
-    )
-    assert not hasattr(core, "prune_stale"), (
-        "prune_stale 본체가 store.core에 남아 있음 — Phase R3에서 완전 제거되어야 함"
     )
 
 
