@@ -92,6 +92,15 @@ class GlobalPlugin(ScriptsMixin, globalPluginHandler.GlobalPlugin):
                   "이전 목록은 자동 복구되지 않으니 필요하면 백업을 확인해 주세요."),
             )
 
+        # 첫 실행 튜토리얼 안내 — tutorialShown=False인 신규 사용자에게 3초 뒤
+        # 확인 다이얼로그 1회 노출. 이미 본 사용자는 즉시 no-op.
+        # 예외는 흡수 — 튜토리얼 안내 실패가 비프 기능 본체를 막으면 더 큰 손해.
+        try:
+            from .tutorial.prompt import maybe_show_first_run_prompt
+            maybe_show_first_run_prompt(self)
+        except Exception:
+            log.exception("mtwn: tutorial first-run prompt failed")
+
     def terminate(self):
         """애드온 재로드/NVDA 종료 시 미저장 변경분 저장 + 설정 패널 해제."""
         try:
