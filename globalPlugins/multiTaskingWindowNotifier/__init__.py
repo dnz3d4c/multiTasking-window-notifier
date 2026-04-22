@@ -92,8 +92,8 @@ class GlobalPlugin(ScriptsMixin, globalPluginHandler.GlobalPlugin):
                   "이전 목록은 자동 복구되지 않으니 필요하면 백업을 확인해 주세요."),
             )
 
-        # 첫 실행 튜토리얼 안내 — tutorialShown=False인 신규 사용자에게 3초 뒤
-        # 확인 다이얼로그 1회 노출. 이미 본 사용자는 즉시 no-op.
+        # 첫 실행 튜토리얼 안내 — tutorialShown=False인 신규 사용자에게 NVDA
+        # welcome 종료 후 확인 다이얼로그 1회 노출. 이미 본 사용자는 즉시 no-op.
         # 예외는 흡수 — 튜토리얼 안내 실패가 비프 기능 본체를 막으면 더 큰 손해.
         try:
             from .tutorial.prompt import maybe_show_first_run_prompt
@@ -102,11 +102,21 @@ class GlobalPlugin(ScriptsMixin, globalPluginHandler.GlobalPlugin):
             log.exception("mtwn: tutorial first-run prompt failed")
 
     def terminate(self):
-        """애드온 재로드/NVDA 종료 시 미저장 변경분 저장 + 설정 패널 해제."""
+        """애드온 재로드/NVDA 종료 시 미저장 변경분 저장 + 설정 패널 해제.
+
+        튜토리얼 첫 실행 프롬프트가 `core.postNvdaStartup`에 등록해둔 핸들러도
+        여기서 해제한다. 해제하지 않으면 재로드 시 구 인스턴스 참조가
+        `postNvdaStartup`에 남아 누수.
+        """
         try:
             store.flush(self.appListFile)
         except Exception:
             log.exception("mtwn: terminate flush")
+        try:
+            from .tutorial.prompt import unregister_first_run_prompt
+            unregister_first_run_prompt()
+        except Exception:
+            log.exception("mtwn: tutorial prompt unregister failed")
         try:
             gui.settingsDialogs.NVDASettingsDialog.categoryClasses.remove(
                 MultiTaskingSettingsPanel

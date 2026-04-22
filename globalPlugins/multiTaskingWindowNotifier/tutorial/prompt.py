@@ -1,21 +1,34 @@
 # -*- coding: utf-8 -*-
 # GNU General Public License v2.0-or-later
 
-"""첫 실행 지연 안내 + 확인 다이얼로그.
+"""첫 실행 안내 + 확인 다이얼로그.
 
 NVDA 부팅 시점에 `GlobalPlugin.__init__`이 호출되면 본 모듈의
-`maybe_show_first_run_prompt(plugin)`가 비동기로 예약된다.
+`maybe_show_first_run_prompt(plugin)`가 `core.postNvdaStartup` 액션 포인트에
+콜백을 등록한다. NVDA가 welcome/startup을 모두 처리한 뒤 1회성으로 발화.
 
 설계:
     - tutorialShown 플래그가 True면 즉시 return.
-    - core.callLater(3000ms)로 지연 — NVDA welcome dialog, startup 음성, OS
-      알림 등이 몰리는 부팅 초기 3초를 피한다.
-    - wx.MessageDialog(YES_NO | CANCEL) 1회. YES → open_tutorial. 나머지 →
-      마감 플래그만 저장.
-    - 어떤 경로로 종료되든 mark_tutorial_shown 호출해 반복 안내를 방지.
+    - `core.postNvdaStartup.register(_on_nvda_ready)` — welcome 종료 후
+      NVDA 이벤트 큐에 콜백 적재.
+    - `_on_nvda_ready`는 queueHandler 컨텍스트에서 실행되므로 `wx.CallAfter`로
+      한 틱 양보한 뒤 `_show_prompt` 실행.
+    - `wx.MessageDialog(YES_NO)` 1회. YES → `open_tutorial`. 나머지 → 조용히 종료.
+    - `mark_tutorial_shown`은 MessageDialog 생성 **성공 직후·ShowModal 진입
+      직전**에 호출. 생성 자체가 실패(wx 리소스 부족 등)하면 플래그를 쓰지
+      않아 다음 부팅에서 재시도 가능.
+
+왜 `core.callLater`가 아닌 `postNvdaStartup`인가:
+    `NVDA/source/core.py:1190` docstring이 공식 금기를 명시 —
+    "callLater should never be used to execute code that brings up a
+    modal UI as it will cause NVDA's core to block". callLater 자체는
+    비동기(`wx.CallLater` 래핑)지만, 콜백에서 `ShowModal`을 호출하면
+    welcome dialog의 중첩 modal 이벤트 루프와 엉켜 NVDA core 큐가
+    정체된다. `postNvdaStartup`은 welcome 종료 후 발화가 보장되는 NVDA
+    공식 액션 포인트(`core.py:53, 1056-1067`).
 
 CLAUDE.md 불변 원칙 6: UI 안내 선제 추가 금지 — 본 모듈은 "첫 실행 1회의
-사용자 선택권 제공"이라는 명시 목적이 있어 예외. mark_tutorial_shown으로
+사용자 선택권 제공"이라는 명시 목적이 있어 예외. `mark_tutorial_shown`으로
 1회성이 보장되며 반복 낭독 리스크 없음.
 """
 
@@ -35,18 +48,21 @@ except Exception:
         return s
 
 
-# 부팅 startup 음성/welcome dialog와 겹치지 않게 지연. 3000ms는 일반 환경
-# 기준 충분한 여유 — welcome 설정이 켜진 사용자도 대부분 이 시점에 welcome
-# dialog를 조작 중이라 확인 다이얼로그가 큐에 들어가면 welcome 종료 후 즉시
-# 노출된다. 더 길게(5~8초) 늘리면 발견성이 떨어짐.
-_DELAY_MS = 3000
+# 모듈 수준 핸들러 참조. postNvdaStartup.register/unregister는 같은 함수 객체
+# 식별로 동작하므로 보관해뒀다가 terminate 시점에 해제한다.
+_registered_handler = None
 
 
 def maybe_show_first_run_prompt(plugin) -> None:
     """첫 실행 사용자에게 튜토리얼 시청 여부를 물어본다.
 
     이미 노출됐으면(tutorialShown=True) 조용히 no-op. 아직이면
-    core.callLater로 3초 뒤 확인 다이얼로그를 예약.
+    `core.postNvdaStartup`에 콜백을 등록. welcome dialog가 종료된 뒤 NVDA
+    이벤트 큐에서 콜백이 발화한다.
+
+    중복 등록 방어: `_registered_handler`가 이미 세팅돼 있으면 skip. 애드온
+    재로드 경로에서 `unregister_first_run_prompt`가 누락됐을 때의 구 인스턴스
+    참조 누수를 방어한다. 정상 흐름에서는 terminate가 반드시 unregister를 호출.
 
     Args:
         plugin: GlobalPlugin 인스턴스. 예외 경로에서 log.exception을 위한
@@ -55,34 +71,67 @@ def maybe_show_first_run_prompt(plugin) -> None:
     if is_tutorial_shown():
         return
 
+    global _registered_handler
+    if _registered_handler is not None:
+        # 같은 프로세스에서 두 번 호출됐거나, 이전 terminate가 unregister에
+        # 실패한 경우. 중복 register 방지 목적으로 조용히 반환.
+        return
+
     try:
-        # core.callLater는 wx.App이 존재할 때만 안전(CLAUDE.md "재방어 금지"
-        # 원칙). GlobalPlugin 시점엔 wx.App이 반드시 있어 별도 폴백 불필요.
         import core
-        core.callLater(_DELAY_MS, _show_prompt)
+        core.postNvdaStartup.register(_on_nvda_ready)
+        _registered_handler = _on_nvda_ready
     except Exception:
-        # 스케줄 실패도 본체 이벤트 훅을 막지 않도록 흡수.
-        log.exception("mtwn: tutorial prompt scheduling failed")
+        # 등록 실패도 본체 이벤트 훅을 막지 않도록 흡수.
+        log.exception("mtwn: tutorial prompt register failed")
+        _registered_handler = None
+
+
+def unregister_first_run_prompt() -> None:
+    """GlobalPlugin.terminate에서 호출. 애드온 재로드 시 구 인스턴스 누수 차단.
+
+    등록된 적이 없으면 no-op. unregister 자체 예외는 다른 terminate 단계를
+    막지 않도록 흡수한다.
+    """
+    global _registered_handler
+    if _registered_handler is None:
+        return
+    try:
+        import core
+        core.postNvdaStartup.unregister(_registered_handler)
+    except Exception:
+        log.exception("mtwn: tutorial prompt unregister failed")
+    finally:
+        _registered_handler = None
+
+
+def _on_nvda_ready() -> None:
+    """`core.postNvdaStartup` 발화 시점 콜백.
+
+    queueHandler 컨텍스트(이벤트 큐)에서 실행되므로 wx 모달은 한 틱 양보한 뒤
+    올리는 것이 표준 — `wx.CallAfter`로 `_show_prompt`를 예약한다.
+
+    등록 이후 사용자가 설정 패널에서 튜토리얼을 먼저 열었을 수도 있어
+    `is_tutorial_shown` 재확인으로 중복 노출 방지.
+    """
+    if is_tutorial_shown():
+        return
+    wx.CallAfter(_show_prompt)
 
 
 def _show_prompt() -> None:
-    """지연 후 실제로 확인 다이얼로그를 띄운다.
+    """실제로 확인 다이얼로그를 띄운다.
 
-    mark_tutorial_shown을 먼저 호출 — 사용자가 다이얼로그를 X로 닫거나
-    모종의 이유로 _on_finish가 호출되지 않는 경로에서도 "다시는 묻지 않음"을
-    보장. YES 선택 시 open_tutorial이 다시 mark를 호출해도 idempotent.
+    `mark_tutorial_shown`은 MessageDialog 생성 성공 **직후**·ShowModal 진입
+    **직전**에 호출. 생성 자체가 실패하면 플래그를 쓰지 않아 다음 부팅에서
+    재시도 가능.
     """
-    # 최종 체크: 지연 사이에 사용자가 설정 패널에서 "튜토리얼 보기"로 먼저
-    # 열어 완료했을 수도 있음. 그 경우 여기서 조용히 종료.
+    # 최종 체크: register → wx.CallAfter 사이에 사용자가 설정 패널에서
+    # 튜토리얼을 먼저 열어 완료했을 수도 있음. 조용히 종료.
     if is_tutorial_shown():
         return
 
-    # 먼저 마감 — 이후 경로 어디서 예외가 터지든 반복 안내는 차단.
-    try:
-        mark_tutorial_shown()
-    except Exception:
-        log.exception("mtwn: tutorial prompt mark_tutorial_shown failed")
-
+    result = None
     try:
         gui.mainFrame.prePopup()
         # Translators: 첫 실행 시 튜토리얼 시청 여부를 묻는 확인 다이얼로그의 본문.
@@ -93,15 +142,22 @@ def _show_prompt() -> None:
         )
         # Translators: 첫 실행 안내 다이얼로그의 제목.
         prompt_title = _("창 전환 알림 — 첫 사용 안내")
-        # wx.YES_NO + X/Escape 모두 mark_tutorial_shown을 위에서 이미 처리했으므로
-        # 반환값 분기는 YES(튜토리얼 열기) vs 나머지(조용히 종료) 둘로 충분.
-        # 일부 플랫폼에서 X 버튼이 비활성화될 수 있지만 기능에는 영향 없음.
-        dlg = wx.MessageDialog(
-            gui.mainFrame,
-            prompt_body,
-            prompt_title,
-            style=wx.YES_NO | wx.ICON_QUESTION,
-        )
+        try:
+            dlg = wx.MessageDialog(
+                gui.mainFrame,
+                prompt_body,
+                prompt_title,
+                style=wx.YES_NO | wx.ICON_QUESTION,
+            )
+        except Exception:
+            # MessageDialog 리소스 생성 실패 — 플래그 안 쓰고 재시도 여지 남김.
+            log.exception("mtwn: tutorial prompt MessageDialog create failed")
+            return
+        # 생성 성공 후 플래그 고정. 이후 경로 어디서 예외가 터지든 반복 안내 차단.
+        try:
+            mark_tutorial_shown()
+        except Exception:
+            log.exception("mtwn: tutorial prompt mark_tutorial_shown failed")
         try:
             result = dlg.ShowModal()
         finally:
@@ -117,7 +173,6 @@ def _show_prompt() -> None:
 
     if result == wx.ID_YES:
         # open_tutorial은 prePopup/postPopup을 자체로 래핑하므로 중첩 안전.
-        # 바로 호출해도 되지만 MessageDialog Destroy 직후 이벤트 루프에 한
-        # 틱 양보하기 위해 CallAfter로 예약.
+        # MessageDialog Destroy 직후 이벤트 루프에 한 틱 양보하려 CallAfter 사용.
         from . import open_tutorial
         wx.CallAfter(open_tutorial, gui.mainFrame, "first_run")

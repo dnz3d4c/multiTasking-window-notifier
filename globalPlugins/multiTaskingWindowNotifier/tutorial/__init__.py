@@ -19,7 +19,8 @@ from logHandler import log
 
 from .. import store
 from ..windowInfo import config_addon_dir
-from .dialog import TutorialDialog, ID_TRY_NOW
+# `.dialog` 및 그 체인(`dialog` → `steps` → `windowEnum`)은 부팅 시점에 필요 없다.
+# `GlobalPlugin.__init__` 동기 구간 단축을 위해 `open_tutorial` 내부에서 지연 import.
 from .state import is_tutorial_shown, mark_tutorial_shown
 
 # 번역 초기화(선택).
@@ -81,6 +82,11 @@ def open_tutorial(parent, source: str = "manual") -> None:
         # self_hwnd는 Phase 3에서 EnumWindows 필터용. 다이얼로그 생성 후에만 알 수 있어
         # 빌더가 필요 시 dialog.GetHandle()을 직접 받을 수 있도록 dialog가 context에 주입.
     }
+
+    # 부팅 동기 구간 보호를 위해 `TutorialDialog` 및 그 체인은 여기서만 로드.
+    # 첫 실행 안내 경로에서는 `prompt._show_prompt`가 `wx.CallAfter(open_tutorial, ...)`
+    # 로 위임하므로 이 시점에도 메인 루프가 한 틱 양보된 뒤라 안전.
+    from .dialog import TutorialDialog
 
     gui.mainFrame.prePopup()
     try:
