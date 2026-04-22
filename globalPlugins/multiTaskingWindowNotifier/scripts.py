@@ -344,6 +344,19 @@ class ScriptsMixin(metaclass=ScriptableType):
             speechPriority=speech.Spri.NEXT,
         )
 
+    @script(
+        # Translators: 입력 제스처 대화상자에 표시되는 튜토리얼 스크립트 설명.
+        description=_("Show multiTaskingWindowNotifier tutorial"),
+        # gesture는 의도적으로 비워둔다 — 기존 NVDA+Shift+T/D/R/I 4개와의 충돌
+        # 걱정 없이 사용자가 직접 원하는 키를 NVDA 입력 제스처 대화상자에서
+        # 할당하도록. 주 진입점은 NVDA 설정 > 창 전환 알림 > "튜토리얼 보기" 버튼.
+    )
+    def script_showTutorial(self, gesture=None):
+        from .tutorial import open_tutorial
+        # CallAfter로 예약 — NVDA 스크립트 핸들러가 복귀한 뒤 GUI 스레드에서 열림.
+        # show_dialog 패턴을 기존 script_showAllEntries와 일치.
+        wx.CallAfter(open_tutorial, gui.mainFrame, "shortcut")
+
     def _delete_entries_from_dialog(self, entries) -> bool:
         """목록 다이얼로그에서 일괄 삭제 호출 시 진행. 저장 성공 여부 반환.
 

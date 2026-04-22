@@ -165,6 +165,23 @@ class MultiTaskingSettingsPanel(SettingsPanel):
         )
         sHelper.addItem(debugHelp)
 
+        # Translators: NVDA 설정 > 창 전환 알림 패널의 튜토리얼 진입 버튼.
+        # 단축키와 별개로 UI에서도 언제든 접근 가능하게 한다.
+        self._tutorialBtn = wx.Button(self, label=_("튜토리얼 보기(&T)"))
+        self._tutorialBtn.Bind(wx.EVT_BUTTON, self._onTutorialClicked)
+        sHelper.addItem(self._tutorialBtn)
+
+    def _onTutorialClicked(self, event):
+        """튜토리얼 다이얼로그를 연다. 설정 대화상자 위에 중첩 모달로 뜸.
+
+        import를 함수 내부에 둔 이유: tutorial 서브패키지는 wx 의존이 있고
+        SettingsPanel 모듈 로드 경로에서 tutorial을 아직 쓰지 않아도 되므로
+        지연 import로 초기 비용 최소화.
+        """
+        import gui
+        from .tutorial import open_tutorial
+        open_tutorial(gui.mainFrame, "settings")
+
     def onSave(self):
         # SpinCtrl의 수동 입력 경로(Ctrl+A 후 타이핑 등)가 범위를 넘길 수 있어
         # 쓰기 시점에 명시적으로 clamp한다. configobj의 validate는 읽기 시점
