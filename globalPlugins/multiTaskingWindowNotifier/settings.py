@@ -32,6 +32,11 @@ CONFSPEC = {
     "beepGapMs": "integer(default=100, min=0, max=200)",
     "debugLogging": "boolean(default=False)",
     "beepPreset": 'string(default="classic")',
+    # 첫 실행 튜토리얼 안내를 이미 띄웠는지 여부.
+    # False → 부팅 시 1회 Yes/No 확인 다이얼로그 노출 (tutorial.prompt).
+    # 사용자의 Yes/No 선택 또는 튜토리얼 ShowModal 종료 경로(any) 모두에서 True로 굳는다.
+    # 기존 사용자도 default=False라 1회 안내받는다(재발견 기회).
+    "tutorialShown": "boolean(default=False)",
 }
 
 # 과거 버전 confspec에 있었으나 의미가 사라져 제거된 키 목록.
