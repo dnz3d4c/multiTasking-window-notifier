@@ -37,13 +37,25 @@ I/O를 제거하고 상수 조회로 되돌렸다. 새 앱(예: VSCode)의 windo
 # 실측 근거(진단 로그):
 #   - 메모장 Ctrl+Tab: obj.window_class_name='RichEditD2DPT' (자식), foregroundClassName='Notepad' (상위)
 #   - Notepad++ MRU 오버레이 진행 중: foregroundClassName='#32770'
-# editor 등재 기준: **같은 제목의 여러 탭**이 정상 케이스인 앱. 메모장이
-# 대표. Notepad++는 파일명 기반이라 title 중복이 드물어 nameChange만으로
-# 충분(필요시 추후 추가). Firefox는 자식==최상위 wcn이라 editor 분기에
-# 등재하면 안 되고 nameChange가 담당.
+#   - Chrome Ctrl+Tab: obj.window_class_name='Chrome_RenderWidgetHostHWND' (자식),
+#     foregroundClassName='Chrome_WidgetWin_1' (상위), foregroundName='<탭 제목> - Chrome'
+# editor 등재 기준(둘 중 하나라도 해당하면 등재 후보):
+#   1) **같은 제목의 여러 탭**이 정상 케이스인 앱 — foreground.name만으로 탭
+#      구분이 불가능하므로 자식 hwnd로 구분해야 한다. 메모장이 대표.
+#   2) Ctrl+Tab이 **event_nameChange를 쏘지 않는** 앱 — title bar가 바뀌어도
+#      NVDA가 그 변경을 nameChange로 전파하지 않아 editor 분기가 유일한 매칭
+#      경로가 된다. Chrome이 대표(실측).
+# Notepad++는 파일명 기반이라 title 중복이 드물고 nameChange를 쏴서 편집기
+# 분기 불필요. Firefox는 자식==최상위 wcn이라 editor 분기에 등재하면 안 되고
+# nameChange가 담당.
+# **CEF 임베디드 앱 경계**: Spotify/Slack 등도 obj.windowClassName이 동일한
+# 'Chrome_RenderWidgetHostHWND'로 관측되지만, 해당 앱들의 appId는 'spotify'/
+# 'slack'이라 `DEFAULT_TAB_CLASSES.get(appId)` 단계에서 None → editor 분기에
+# 진입하지 않는다. `"chrome"` 키는 독립 Chrome 브라우저에만 적용된다.
 DEFAULT_TAB_CLASSES = {
-    "notepad":   {"editor": ("RichEditD2DPT",), "overlay": ()},
-    "notepad++": {"editor": (),                 "overlay": ("#32770",)},
+    "notepad":   {"editor": ("RichEditD2DPT",),            "overlay": ()},
+    "notepad++": {"editor": (),                            "overlay": ("#32770",)},
+    "chrome":    {"editor": ("Chrome_RenderWidgetHostHWND",), "overlay": ()},
 }
 
 

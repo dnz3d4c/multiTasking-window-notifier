@@ -169,6 +169,32 @@ def test_editor_branch_uses_foreground_name(captured_match, mock_api, monkeypatc
     assert tab_signature == 0xE001
 
 
+def test_editor_branch_chrome_ctrl_tab(captured_match, mock_api, monkeypatch, debug_off):
+    """Chrome Ctrl+Tab 실측 케이스: obj.wcn='Chrome_RenderWidgetHostHWND' (자식),
+    foreground.wcn='Chrome_WidgetWin_1' (상위), foreground.name='<탭 제목> - Chrome'.
+
+    editor 게이트(window_class_name != foreground_class_name)가 통과되고,
+    is_editor_class가 실제 DEFAULT_TAB_CLASSES 조회로 True를 돌려줘야 한다.
+    normalize_title이 꼬리 ' - Chrome'을 제거해 '링키지랩'만 남고, tab_signature는
+    자식 renderer hwnd(탭별 고유)로 떨어져 같은 제목의 다른 탭도 sig로 구분된다.
+    """
+    plugin, calls = captured_match
+    obj = _make_obj(window_class_name="Chrome_RenderWidgetHostHWND", name="링키지랩", hwnd=0x7A01, appName="chrome")
+    foreground = _make_obj(window_class_name="Chrome_WidgetWin_1", name="링키지랩 - Chrome", hwnd=0x7A00, appName="chrome")
+    mock_api(foreground)
+
+    # is_editor_class/is_overlay_class는 실제 상수 테이블 조회를 그대로 사용 (monkeypatch 없음).
+
+    eventRouter.dispatch_focus(plugin, obj)
+
+    assert len(calls) == 1
+    appId, title, tab_signature = calls[0]
+    assert appId == "chrome"
+    assert title == "링키지랩"
+    # editor 분기 불변: 자식(obj) hwnd를 tab_signature로. foreground hwnd 쓰면 탭 구분 불가.
+    assert tab_signature == 0x7A01
+
+
 def test_editor_branch_skipped_when_child_wcn_equals_foreground_class_name(
     captured_match, mock_api, monkeypatch, debug_off
 ):

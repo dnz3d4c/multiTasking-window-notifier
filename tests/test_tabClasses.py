@@ -15,6 +15,12 @@ def test_is_editor_class_true_for_default_entry():
     assert tabClasses.is_editor_class("notepad", "RichEditD2DPT") is True
 
 
+def test_is_editor_class_true_for_chrome():
+    """Chrome의 Ctrl+Tab은 event_nameChange 미발화 + gainFocus만 발화하므로
+    editor 분기가 유일한 매칭 경로. Chrome_RenderWidgetHostHWND는 탭별 자식 hwnd."""
+    assert tabClasses.is_editor_class("chrome", "Chrome_RenderWidgetHostHWND") is True
+
+
 def test_is_overlay_class_true_for_default_entry():
     """DEFAULT_TAB_CLASSES의 overlay 항목은 True를 반환한다."""
     assert tabClasses.is_overlay_class("notepad++", "#32770") is True
