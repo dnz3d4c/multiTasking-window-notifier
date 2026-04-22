@@ -109,6 +109,21 @@ _gui.settingsDialogs = _settingsDialogs
 sys.modules["logHandler"].log = MagicMock(name="logHandler.log")
 
 
+# NVDAObjects.window.Window: windowEnum 모듈이 `isinstance(obj, Window)` 체크에
+# 사용한다. 실제 Window 클래스 대신 스텁 클래스를 주입 — 테스트는 MagicMock(spec=Window)
+# 로 isinstance True를 확보한다.
+_nvda_objects = types.ModuleType("NVDAObjects")
+sys.modules["NVDAObjects"] = _nvda_objects
+
+_nvda_objects_window = types.ModuleType("NVDAObjects.window")
+class _WindowStub:
+    """NVDAObjects.window.Window 타입 체크 통과용 스텁. 실제 속성은 없음."""
+    pass
+_nvda_objects_window.Window = _WindowStub
+sys.modules["NVDAObjects.window"] = _nvda_objects_window
+_nvda_objects.window = _nvda_objects_window
+
+
 # ─── autouse fixture ──────────────────────────────────────────────────────────
 
 @pytest.fixture(autouse=True)
