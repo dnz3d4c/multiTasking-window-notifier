@@ -71,7 +71,10 @@ def open_tutorial(parent, source: str = "manual") -> None:
         log.info(f"mtwn: tutorial closed source={source!r} kind={kind!r}")
         if kind == "try_now":
             ui.message(
-                _("Alt+Tab으로 원하는 창으로 이동한 뒤 NVDA+Shift+T를 눌러 등록해 보세요."),
+                _(
+                    "Alt+Tab으로 원하는 창으로 이동한 뒤 NVDA+Shift+T를 누르세요. "
+                    "창만 등록할지 앱 전체로 등록할지 묻는 다이얼로그가 먼저 떠요."
+                ),
                 speechPriority=speech.Spri.NEXT,
             )
 

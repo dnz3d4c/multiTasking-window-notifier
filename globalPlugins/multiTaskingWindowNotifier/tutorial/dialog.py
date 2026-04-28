@@ -15,6 +15,9 @@ Panel을 직접 교체하면서 단계 전환마다 명시적으로 SetFocus + u
 한 다이얼로그 당 한 번만 ShowModal 호출. on_finish 콜백은 종료 직전에 한 번
 호출되며 kind 인자로 종료 경로 구분("completed" | "skipped" | "try_now").
 mark_tutorial_shown은 모든 종료 경로에서 자동 호출.
+
+진행률 표시("{cur}/{total}단계: {name}")는 STEPS 리스트 길이를 동적으로 참조.
+단계 추가/삭제는 steps.py의 STEPS만 수정하면 본 클래스는 자동 적용.
 """
 
 import wx
@@ -41,7 +44,7 @@ ID_TRY_NOW = wx.NewIdRef()
 
 
 class TutorialDialog(wx.Dialog):
-    """6단계 위저드. 이전/다음/건너뛰기 3버튼 + 단계별 Panel 교체.
+    """단계별 위저드. 이전/다음/건너뛰기 3버튼 + 단계별 Panel 교체.
 
     Args:
         parent: 부모 창 (보통 gui.mainFrame).
@@ -70,8 +73,8 @@ class TutorialDialog(wx.Dialog):
     def _create_ui(self):
         sHelper = guiHelper.BoxSizerHelper(self, orientation=wx.VERTICAL)
 
-        # 제목 라벨: "튜토리얼 — 2/6단계: 비프음 들어보기" 형식.
-        # 단계 전환마다 SetLabel로 갱신.
+        # 제목 라벨: "튜토리얼 — 2/N단계: 비프음 들어보기" 형식.
+        # N은 STEPS 리스트 길이로 동적 결정. 단계 전환마다 SetLabel로 갱신.
         self._titleLabel = wx.StaticText(self, label="")
         sHelper.addItem(self._titleLabel)
 
@@ -140,19 +143,18 @@ class TutorialDialog(wx.Dialog):
         self.Layout()
         self.Fit()
 
-        # 낭독 순서: 제목 → focusable 자식 자동 낭독. ui.message를 SetFocus
-        # 보다 먼저 호출해야 speech queue에 title이 먼저 들어가고, 이어지는
-        # 포커스 이벤트 자동 낭독이 뒤에 붙는다. 반대로 SetFocus를 먼저 하면
-        # NVDA focus 이벤트가 speech를 선점해 "컨트롤 → 제목" 역순이 될 수
-        # 있다. 또한 focusable 자식이 있는 단계(ListBox/Button 등, Phase 3~)
-        # 에서 title과 자식 이름이 뭉쳐 들리지 않도록 Spri.NEXT를 쓴다 —
-        # 기존 낭독을 끊지 않고 뒤에 이어붙는다.
+        # 낭독 순서: 제목(ui.message) → focusable 자식 포커스 → NVDA 자동 낭독.
+        # ui.message를 SetFocus 앞에 둬 speech queue에 title이 먼저 들어가고,
+        # 이어지는 포커스 이벤트 낭독이 뒤에 붙는다. 반대로 SetFocus가 먼저면
+        # 포커스 이벤트가 speech를 선점해 "컨트롤 → 제목" 역순이 될 수 있다.
+        # Spri.NEXT는 기존 낭독을 끊지 않고 뒤에 이어붙인다.
         ui.message(title, speechPriority=speech.Spri.NEXT)
 
-        # 포커스 타깃: focusable 자식 우선. welcome/shortcuts처럼 StaticText만
-        # 있는 단계는 focusable 자식이 0개이므로 제목 라벨로 폴백한다.
-        # StaticText.SetFocus는 실질 무시되지만 다이얼로그 포커스가 표류하지
-        # 않도록 placeholder로 유지.
+        # 포커스 타깃: 첫 focusable 자식. 각 빌더가 설명 readonly TextCtrl을
+        # 가장 먼저 얹으므로 정상 경로에선 이 TextCtrl이 선정된다 — 사용자는
+        # 자동으로 설명 낭독을 듣고 화살표로 줄 단위 탐색 가능. panel 렌더가
+        # 실패해 자식이 없을 때만 titleLabel(StaticText) 폴백 — SetFocus는
+        # 실질 무시되지만 다이얼로그 포커스가 표류하지 않도록 안전망.
         children = self._contentPanel.GetChildren()
         focusable = next((c for c in children if c.AcceptsFocus()), None)
         if focusable is not None:
