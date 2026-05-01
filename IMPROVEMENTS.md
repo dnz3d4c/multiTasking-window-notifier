@@ -666,9 +666,32 @@ Phase 5 실기 사용 후 사용자 피드백 4건(날카로움/볼륨 문제/�
 
 ---
 
+### Phase 13 (완료): 페어 리뷰(Codex × Claude) 후속 — 데이터 무결성 + GUI 모달 + 빌드 메타
+
+본 프로젝트 첫 cross-provider 페어 리뷰(2026-05-01) 결과 채택분 적용. 5트랙 병렬(Codex `--deep` + NVDA Specialist 2 + Python Specialist + wxPython Specialist)로 14모듈 3,353줄을 검토하고 토론 5분류로 28건 발견 → Important 9건 채택.
+
+| 단계 | 변경 | 대상 IMP | 결과 |
+|---|---|---|---|
+| 13-1 | `store.py` 손상 처리 정책 통일 — `_load_from_json`의 key 타입·items 길이·tabBeepIdx 검증을 한 정책으로(`return None` = 전체 손상). `_save_to_disk`가 `corrupted=True` 첫 저장 시 `app.json.corrupted-{timestamp}` 자동 백업 | IMP-2/3/4/9 | 손상 데이터가 자동 보정으로 슬쩍 덮어써지지 않음. 사용자 복구 기회 보존 |
+| 13-2 | `store.py` 메모리/디스크 일관성 — `set_aliases`/`move_item`을 `save()` 패턴(temp_state 적용 → 디스크 성공 후 메모리 반영)으로 정렬. `set_aliases` 입력에 `normalize_title` 자동 적용 | IMP-1/5 | 디스크 실패 시 메모리/디스크 분리 잔존 제거. 호출부 정규화 누락 안전망 |
+| 13-3 | `listDialog.py` 5곳 `wx.MessageBox(..., self)` → `with wx.MessageDialog(self, ...) as dlg: dlg.ShowModal()` (반환 상수 `wx.YES/CANCEL` → `wx.ID_YES/wx.ID_CANCEL` 정정). `scripts.py` `_prompt_for_alias`가 `current_alias` 분기로 prompt 분리, 편집 시 "비우고 확인하면 기존 대체 제목이 삭제돼요" 안내 추가 | IMP-7/8 | NVDA 포커스 복귀 일관성. 의도치 않은 alias 삭제 방지 |
+| 13-4 | `manifest.ini` `docFileName = readme.html` 제거 — 실제 readme.html 부재로 NVDA 도움말 진입이 깨졌던 dead link 정리 | IMP-6 | 빌드 패키지 정합 |
+
+**페어 리뷰 핵심 인사이트**:
+- 양측 독립 도달 1건(IMP-1)은 priority 가중 — 양측 합의는 실제 핵심 이슈 시그널
+- Codex가 코드 외부 산출물(manifest dead link), Claude 4트랙이 코드 내부 정합성에 집중 — 두 시각이 보완적
+- NVDA Phase 교훈(R/R4b/R5/T/불변원칙 6번) 6항목 모두 통과 — 사전 컨텍스트 주입이 false positive를 효과적으로 막음
+
+**테스트**: 신규 `tests/test_phase13_pair_review.py` 11건 (IMP-1~9 모두 회귀 차단). 전체 232 → 243 passed. 회귀 0.
+
+**상세 리포트**: `docs/reviews/2026-05-01-pair-review.md`
+**플랜**: `C:\Users\advck\.claude\plans\floofy-riding-patterson.md`
+
+---
+
 ## 현재 로드맵
 
-*(활성 로드맵 없음. Phase 12까지 완료. 총 **4프리셋** 운영 — classic / pentatonic / fifths / moss_bell. 모두 tonal 타입, NVDA `tones.beep` 단일 경로. 차기 작업은 사용자 요청 시 재시작.)*
+*(활성 로드맵 없음. Phase 13까지 완료. 총 **4프리셋** 운영 — classic / pentatonic / fifths / moss_bell. 모두 tonal 타입, NVDA `tones.beep` 단일 경로. 차기 작업은 사용자 요청 시 재시작.)*
 
 ---
 
