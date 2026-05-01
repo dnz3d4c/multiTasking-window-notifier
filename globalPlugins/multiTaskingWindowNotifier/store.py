@@ -43,11 +43,12 @@ path 인자는 기존 `app.list` 경로를 그대로 받는다. 내부에서 같
 
 import json
 import os
+import shutil
 from datetime import datetime
 
 from logHandler import log
 
-from .appIdentity import splitKey
+from .appIdentity import normalize_title, splitKey
 from .constants import (
     MAX_ITEMS,
     SCOPE_APP,
@@ -147,9 +148,10 @@ def _load_from_json(json_path: str):
         return None
     if len(items) > MAX_ITEMS:
         log.warning(
-            f"mtwn: app.json has {len(items)} items, exceeds limit({MAX_ITEMS}). "
-            f"Only first {MAX_ITEMS} will be loaded."
+            f"mtwn: app.json has {len(items)} items, exceeds limit({MAX_ITEMS}) — "
+            f"treated as corrupted to preserve original (path={json_path})"
         )
+        return None
 
     raw_app_beep_map = data.get("appBeepMap", {})
     if not isinstance(raw_app_beep_map, dict):
@@ -167,23 +169,35 @@ def _load_from_json(json_path: str):
         app_beep_map[app_id] = idx
 
     fixed = []
-    for it in items[:MAX_ITEMS]:
+    for it in items:
         if not isinstance(it, dict) or "key" not in it:
             continue
+        key_value = it["key"]
+        if not isinstance(key_value, str) or not key_value:
+            log.warning(
+                "mtwn: invalid item key=%r in app.json — file treated as corrupted",
+                key_value,
+            )
+            return None
         scope = it.get("scope")
         if scope not in (SCOPE_APP, SCOPE_WINDOW):
             log.warning(
                 "mtwn: invalid scope %r in app.json item key=%r — file treated as corrupted",
-                scope, it.get("key"),
+                scope, key_value,
             )
             return None
-        meta = _new_meta(it["key"], scope=scope)
+        meta = _new_meta(key_value, scope=scope)
         for k, v in it.items():
             if k == "scope":
                 continue
             if k == "tabBeepIdx":
                 if scope == SCOPE_WINDOW and isinstance(v, int) and 0 <= v < MAX_ITEMS:
                     meta["tabBeepIdx"] = v
+                elif scope == SCOPE_WINDOW:
+                    log.warning(
+                        f"mtwn: tabBeepIdx for key={key_value!r} = {v!r} invalid, "
+                        f"will be reassigned"
+                    )
                 continue
             if k == "aliases":
                 if isinstance(v, list):
@@ -199,6 +213,9 @@ def _save_to_disk(list_path: str, state: dict) -> bool:
     """원자적 저장(.tmp → os.replace). 성공 시 True, 실패 시 False.
 
     사용자 알림은 호출부 책임. 본 함수는 log만 남긴다.
+    `state["corrupted"]`가 True인 상태에서 처음 저장할 때는 손상 원본을
+    `app.json.corrupted-{timestamp}`로 백업한 뒤 본체를 덮어쓴다 — 사용자가
+    "손상 안내 → 신규 등록"으로 즉시 진행해도 원본 복구 기회를 보존한다.
     """
     json_path = _json_path(list_path)
     try:
@@ -206,6 +223,17 @@ def _save_to_disk(list_path: str, state: dict) -> bool:
     except Exception:
         log.error(f"mtwn: app.json mkdir failed path={json_path}", exc_info=True)
         return False
+
+    if state.get("corrupted") and os.path.exists(json_path):
+        backup = f"{json_path}.corrupted-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+        try:
+            shutil.copy2(json_path, backup)
+            log.info(f"mtwn: backed up corrupted app.json → {backup}")
+        except Exception:
+            log.error(
+                f"mtwn: corrupted backup failed (proceeding with save) path={json_path}",
+                exc_info=True,
+            )
 
     tmp = json_path + ".tmp"
     payload = {
@@ -441,10 +469,12 @@ def save(list_path: str, keys, scopes=None) -> bool:
         else:
             new_items.append(_new_meta(k, scope=scopes.get(k, SCOPE_WINDOW)))
     # appBeepMap은 기존 상태 복사 — 새 appId가 있으면 _ensure_beep_assignments가 할당.
+    # corrupted 플래그를 전파해 _save_to_disk가 손상 원본 백업 후 본체 저장하도록 한다.
     temp_state = {
         "items": new_items,
         "appBeepMap": dict(state.get("appBeepMap", {})),
         "dirty": True,
+        "corrupted": state.get("corrupted", False),
     }
     _ensure_beep_assignments(temp_state)
     if not _save_to_disk(list_path, temp_state):
@@ -547,12 +577,17 @@ def get_tab_beep_idx(list_path: str, key: str):
 def set_aliases(list_path: str, key: str, aliases) -> bool:
     """entry의 aliases 배열을 업데이트하고 즉시 디스크에 저장.
 
-    정규화된 alias 목록을 통으로 교체 (append 아님).
+    alias 목록을 통으로 교체 (append 아님).
 
     입력 필터링:
         - list/tuple/set 이외 타입은 빈 리스트로 간주
-        - 각 요소는 str + non-empty만 수용
+        - 각 요소는 str + non-empty만 수용 후 `normalize_title`로 정규화
+        - 정규화 결과 빈 문자열은 드롭
         - 저장 순서는 입력 순서 유지 (dedup 없음 — 호출부 책임)
+
+    저장 전략 (save() 패턴):
+        디스크 쓰기가 성공했을 때만 메모리 반영. 실패 시 메모리는 이전
+        상태 그대로라 호출부의 False 응답과 메모리/디스크가 일관.
 
     Args:
         list_path: 기존 app.list 경로 (내부에서 app.json으로 변환)
@@ -564,23 +599,34 @@ def set_aliases(list_path: str, key: str, aliases) -> bool:
     """
     state = _load_state(list_path)
     if isinstance(aliases, (list, tuple, set)):
-        clean = [s for s in aliases if isinstance(s, str) and s]
+        normalized = (normalize_title(s) for s in aliases if isinstance(s, str) and s)
+        clean = [s for s in normalized if s]
     else:
         clean = []
-    found = None
-    for it in state["items"]:
+    target_idx = None
+    for i, it in enumerate(state["items"]):
         if it.get("key") == key:
-            found = it
+            target_idx = i
             break
-    if found is None:
+    if target_idx is None:
         log.warning(f"mtwn: set_aliases key not found {key!r}")
         return False
-    found["aliases"] = clean
-    state["dirty"] = True
-    if _save_to_disk(list_path, state):
-        state["dirty"] = False
-        return True
-    return False
+    new_items = list(state["items"])
+    new_entry = dict(new_items[target_idx])
+    new_entry["aliases"] = clean
+    new_items[target_idx] = new_entry
+    temp_state = {
+        "items": new_items,
+        "appBeepMap": dict(state.get("appBeepMap", {})),
+        "dirty": True,
+        "corrupted": state.get("corrupted", False),
+    }
+    if not _save_to_disk(list_path, temp_state):
+        return False
+    state["items"] = new_items
+    state["dirty"] = False
+    state["corrupted"] = False
+    return True
 
 
 def move_item(list_path: str, key: str, direction: str) -> bool:
@@ -588,6 +634,10 @@ def move_item(list_path: str, key: str, direction: str) -> bool:
 
     등록 순서가 곧 표시 순서. 이동 성공 시 배열의 인접 두 요소를 swap하고
     원자적 `.tmp → replace`로 디스크 반영.
+
+    저장 전략 (save() 패턴):
+        디스크 쓰기가 성공했을 때만 메모리 반영. 실패 시 메모리는 이전
+        순서 그대로라 호출부의 False 응답과 메모리/디스크가 일관.
 
     Args:
         list_path: 기존 app.list 경로 (내부에서 app.json으로 변환)
@@ -619,9 +669,17 @@ def move_item(list_path: str, key: str, direction: str) -> bool:
         if idx >= len(items) - 1:
             return False
         swap_idx = idx + 1
-    items[idx], items[swap_idx] = items[swap_idx], items[idx]
-    state["dirty"] = True
-    if _save_to_disk(list_path, state):
-        state["dirty"] = False
-        return True
-    return False
+    new_items = list(items)
+    new_items[idx], new_items[swap_idx] = new_items[swap_idx], new_items[idx]
+    temp_state = {
+        "items": new_items,
+        "appBeepMap": dict(state.get("appBeepMap", {})),
+        "dirty": True,
+        "corrupted": state.get("corrupted", False),
+    }
+    if not _save_to_disk(list_path, temp_state):
+        return False
+    state["items"] = new_items
+    state["dirty"] = False
+    state["corrupted"] = False
+    return True
