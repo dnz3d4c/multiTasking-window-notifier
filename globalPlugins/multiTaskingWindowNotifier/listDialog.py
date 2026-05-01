@@ -257,12 +257,13 @@ class AppListDialog(wx.Dialog):
             wx.Bell()
             return
         if len(selected) > 1:
-            wx.MessageBox(
+            with wx.MessageDialog(
+                self,
                 _("대체 제목 편집은 한 번에 한 항목만 할 수 있어요."),
                 _("안내"),
                 wx.OK | wx.ICON_INFORMATION,
-                self,
-            )
+            ) as dlg:
+                dlg.ShowModal()
             return
         entry = selected[0]
         result = self._on_edit_alias(entry)
@@ -270,12 +271,13 @@ class AppListDialog(wx.Dialog):
             # 사용자 취소 — 아무 변경 없음
             return
         if result is False:
-            wx.MessageBox(
+            with wx.MessageDialog(
+                self,
                 _("저장 중 문제가 생겨 대체 제목을 바꾸지 못했어요."),
                 _("오류"),
                 wx.OK | wx.ICON_ERROR,
-                self,
-            )
+            ) as dlg:
+                dlg.ShowModal()
             return
         # 성공 → 표시 텍스트 갱신 (alias 꼬리표 반영).
         idx = self._entries.index(entry)
@@ -298,12 +300,13 @@ class AppListDialog(wx.Dialog):
             wx.Bell()
             return
         if not self._on_move(entry, direction):
-            wx.MessageBox(
+            with wx.MessageDialog(
+                self,
                 _("저장 중 문제가 생겨 순서를 바꾸지 못했어요."),
                 _("오류"),
                 wx.OK | wx.ICON_ERROR,
-                self,
-            )
+            ) as dlg:
+                dlg.ShowModal()
             return
         # 로컬 _entries + ListBox 표시 동기화 (두 항목만 swap).
         self._entries[idx], self._entries[new_idx] = self._entries[new_idx], self._entries[idx]
@@ -333,26 +336,28 @@ class AppListDialog(wx.Dialog):
                 "선택한 앱 항목과 같은 앱의 창 항목 %d개가 함께 등록되어 있어요.\n"
                 "창 항목들도 같이 지울까요?"
             ) % len(same_app_windows)
-            resp = wx.MessageBox(
+            with wx.MessageDialog(
+                self,
                 msg,
                 _("앱 항목 삭제 확인"),
                 wx.YES_NO | wx.CANCEL | wx.ICON_QUESTION,
-                self,
-            )
-            if resp == wx.CANCEL:
+            ) as dlg:
+                resp = dlg.ShowModal()
+            if resp == wx.ID_CANCEL:
                 return
-            if resp == wx.YES:
+            if resp == wx.ID_YES:
                 cascade_targets = same_app_windows
 
         targets = list(dict.fromkeys(selected + cascade_targets))  # 순서 보존 + 중복 제거
 
         if not self._on_delete(targets):
-            wx.MessageBox(
+            with wx.MessageDialog(
+                self,
                 _("저장 중 문제가 생겨 삭제하지 못했어요."),
                 _("오류"),
                 wx.OK | wx.ICON_ERROR,
-                self,
-            )
+            ) as dlg:
+                dlg.ShowModal()
             return
 
         # 표시 갱신: 내부 entries에서 제거하고 다이얼로그는 열어둠.

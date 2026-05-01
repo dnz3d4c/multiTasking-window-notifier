@@ -73,11 +73,20 @@ def _prompt_for_alias(current_alias: str = "") -> str | None:
     """
     gui.mainFrame.prePopup()
     try:
-        prompt = _(
-            "이 항목이 Alt+Tab 등 다른 경로에서 다른 이름으로 들리면 입력해요.\n"
-            "예: 어떤 메신저앱은 Alt+Tab에서 '대화창제목' 같은 대화 이름으로 보여요.\n"
-            "대체 제목이 없다면 빈 값으로 확인하면 돼요."
-        )
+        if current_alias:
+            # 편집 컨텍스트 — 빈 입력은 "삭제"임을 명시. 사용자가 Ctrl+A → Delete →
+            # Enter로 의도치 않게 기존 alias를 지우는 사고를 방지.
+            prompt = _(
+                "이 항목이 Alt+Tab 등 다른 경로에서 다른 이름으로 들리면 입력해요.\n"
+                "예: 어떤 메신저앱은 Alt+Tab에서 '대화창제목' 같은 대화 이름으로 보여요.\n"
+                "비우고 확인하면 기존 대체 제목이 삭제돼요."
+            )
+        else:
+            prompt = _(
+                "이 항목이 Alt+Tab 등 다른 경로에서 다른 이름으로 들리면 입력해요.\n"
+                "예: 어떤 메신저앱은 Alt+Tab에서 '대화창제목' 같은 대화 이름으로 보여요.\n"
+                "대체 제목이 없다면 빈 값으로 확인하면 돼요."
+            )
         dlg = wx.TextEntryDialog(
             gui.mainFrame,
             prompt,
