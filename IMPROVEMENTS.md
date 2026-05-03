@@ -689,9 +689,51 @@ Phase 5 실기 사용 후 사용자 피드백 4건(날카로움/볼륨 문제/�
 
 ---
 
+### Phase 14 (완료): 두 번째 비프 지연 근본 해소 — nvwave PCM 큐잉
+
+사용자 보고: Alt+Tab으로 등록 창 진입 시 2음 비프(a → 100ms gap → b) 중 b가 메인 스레드 부하/freeze 시 600ms+ 늦게 울림. 로그상 Firefox YouTube 진입 직후 `watchdog.waitForFreezeRecovery` 0.55초 직접 증거.
+
+**근본 원인**: 기존 `core.callLater(gap_ms, tones.beep, b)` 경로가 (1) `wx.CallLater` 타이머 + (2) `queueHandler.eventQueue` dispatch 두 단계 모두 NVDA 메인 스레드 의존(`core.py:1187-1208`). freeze 중 둘 다 밀려 100ms 약속이 깨짐.
+
+**채택 옵션 평가**:
+- 옵션 A (`threading.Timer` + `wx.CallAfter`) — 타이머만 OS 측. dispatch는 여전히 wx 큐 의존이라 freeze 케이스 부분 해결.
+- 옵션 D (자체 `WavePlayer` + `nvwave.playWaveFile`) — 전역 player 우회로 NVDA volume/duck 정책 분리.
+- **옵션 E (선택)** — NVDA 전역 `tones.player`에 a + silence + b를 한 번에 enqueue. OS 오디오 스택 측 정확 타이밍, 메인 스레드 freeze 무관. NVDA 정책 보존.
+
+**변경 (`beepPlayer.py`)**:
+- `_schedule_second_beep` 제거.
+- `_play_two_tone_burst(a_freq, b_freq, duration, gap_ms)` 신설:
+  1. `tones.player is None` 가드.
+  2. `tones.beep(a)` — `decide_beep` 확장 포인트 통과.
+  3. `tones.decide_beep.decide(hz=b_freq, ...)` 1회 호출 — a가 차단됐으면 b도 차단(음소거/원격제어 핸들러 일관성).
+  4. `NVDAHelper.localLib.generateBeep`으로 b 버퍼 생성 + silence 버퍼 `bytes(gap_ms * 176)` (stereo 16-bit @ 44100 Hz). `tones.player.feed(silence + b_buf)` 직접 호출.
+  5. except 폴백 — `core.callLater` 경로로 회귀해 동작 보존.
+- `play_beep` SCOPE_WINDOW + tab_idx 분기 + `play_preview` 둘 다 `_play_two_tone_burst` 호출.
+- `omit_app_beep=True`(intra-app 단음) 분기는 변경 없음.
+
+**Phase 11 "tones.beep 단일 경로" 원칙 부분 완화 사유**:
+| 비교 축 | Phase 11 제거 대상 | Phase 14 도입 |
+|---------|---------------------|--------------------|
+| 동기 | 프리셋 다양성(음색 축) — 변별 무근거 | 타이밍 정확성 — watchdog freeze 0.55초 직접 증거 |
+| 경로 | `synthEngine.render_spec` → 파일 캐시 → `nvwave.playWaveFile(path)` | `NVDAHelper.localLib.generateBeep` → in-memory bytes → `tones.player.feed(buf)` |
+| 코드량 | 298줄(synthEngine.py 전체) | ~30줄 |
+| 외부 의존 | numpy 회피 위해 자체 PCM | NVDA 내장 generateBeep — `tones.py:84`와 동일 import |
+
+Phase 11 동기(음색 변별 무근거)는 Phase 14와 무관. `tones.player.feed`는 NVDA 자체가 speech 합성에서 매 발화 사용하는 표준 API다.
+
+**리뷰**:
+- NVDA Addon Development Specialist — 필수 수정 0건. 설계가 NVDA 표준 패턴(espeak/sapi5/oneCore도 동일 feed)과 일치.
+- Codex (cross-provider) — P1 1건: `decide_beep` 취소 시 b 차단 누락. 적용 후 통과.
+
+**커밋**: 단일 커밋으로 진행 (예정).
+
+**플랜**: `C:\Users\advck\.claude\plans\enchanted-cooking-thunder.md`
+
+---
+
 ## 현재 로드맵
 
-*(활성 로드맵 없음. Phase 13까지 완료. 총 **4프리셋** 운영 — classic / pentatonic / fifths / moss_bell. 모두 tonal 타입, NVDA `tones.beep` 단일 경로. 차기 작업은 사용자 요청 시 재시작.)*
+*(활성 로드맵 없음. Phase 14까지 완료. 총 **4프리셋** 운영 — classic / pentatonic / fifths / moss_bell. 모두 tonal 타입. 비프 재생 경로는 NVDA `tones.beep` + b 한정 `tones.player.feed` PCM 큐잉. 차기 작업은 사용자 요청 시 재시작.)*
 
 ---
 

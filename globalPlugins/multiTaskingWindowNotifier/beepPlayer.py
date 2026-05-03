@@ -11,22 +11,46 @@ v4 2차원 비프:
     - a와 b가 순차로 재생되므로 절대 비교 대신 상대 비교가 되어 작은 간격도
       충분히 변별된다.
 
-NVDA `tones.beep` 단일 경로로 통합. 과거 hybrid 프리셋의 파형 합성
-(synthEngine.render_wav + nvwave.playWaveFile) 경로는 제거됐다. `tones.beep`은
-20년+ 안정 SDK이고 NVDA 다른 애드온 관용과 일치한다.
-
 타이밍 원칙:
-    - gap_ms는 NVDA `core.callLater`로 비동기 예약. 내부에서 wx.CallLater를
-      거쳐 queueHandler.eventQueue로 진입하므로 NVDA 이벤트 큐와 정합성 유지.
-      `event_gainFocus`를 블로킹하지 않는다.
-    - settings.CONFSPEC 기본값은 duration=50ms, gap=100ms. 2음 총 150ms
-      (duration 50 + gap 100)로 v3 단음 100ms보다 길지만 두 음 변별을 위한
-      여유가 필수.
+    - 2음 a+silence(gap_ms)+b를 한 번에 OS 오디오 큐에 enqueue한다. 첫 a는
+      `tones.beep`(NVDA 표준 경로 — `decide_beep` 확장 포인트 호환)으로 발화하고,
+      직후 `tones.player.feed(silence + b_buf)`를 호출해 silence와 b를 큐에
+      append한다. `nvwave.WavePlayer.feed` docstring(`nvwave.py:321-330`)이
+      "uninterrupted playback as long as a new chunk is fed before the previous
+      chunk has finished playing"을 보장하므로 OS 오디오 스택이 정확한 타이밍에
+      자체 재생한다.
+    - 핵심 효과: NVDA 메인 스레드 freeze(watchdog 0.5초+)에도 b 발화가 정확히
+      a 후 gap_ms에 일관 발화. 이전 `core.callLater(gap_ms, tones.beep)` 경로는
+      wx 타이머 + queueHandler.eventQueue 두 단계 모두 메인 스레드 의존이라
+      freeze 중 b가 600ms+로 밀리는 회귀 발생.
+    - settings.CONFSPEC 기본값은 duration=50ms, gap=100ms.
+
+Phase 11 "tones.beep 단일 경로" 원칙 부분 완화:
+    Phase 11(`ef9b09e`)은 프리셋 다양성 위한 synthEngine + nvwave.playWaveFile
+    파일 캐시 경로를 제거하면서 단일 경로 원칙을 명문화했다. 본 모듈의 b 우회는
+    동기가 다르다 — "타이밍 정확성"이라는 별개 요구이며 `tones.player.feed`는
+    NVDA 자체가 speech 합성에서 매 발화 사용하는 표준 API다. 첫 a는 여전히
+    `tones.beep`을 거치므로 `decide_beep` 확장 포인트는 a 시점 1회 작동한다.
+
+decide_beep 일관성:
+    `tones.beep`(a 호출)이 `decide_beep` 확장 포인트로 취소되면 a는 무음 반환된다
+    (`tones.py:71-81`). 이 경우 b도 `tones.player.feed`로 직접 enqueue하면 로컬
+    비프 차단 의도를 우회한다. b enqueue 전에 같은 `decide_beep.decide()`를 한 번
+    더 호출해 a/b 결정을 동기화한다 — 비프 음소거/원격 제어 핸들러가 a를 막으면 b도
+    같이 막힌다.
+
+폴백:
+    `NVDAHelper.localLib.generateBeep` import 실패(NVDA 버전 호환) 또는
+    `tones.player`가 None(NVDA 종료/재로드 직전) 시 기존 `core.callLater`
+    경로로 회귀해 동작 자체는 보존한다. user-facing 영향은 callLater 회귀
+    (freeze 시 b 지연 가능)만이고 무음 회귀는 없다.
 
 프리셋 폴백:
     미지 preset_id 조회 시 classic 폴백 + 경고는 `presets.get_preset_or_classic`
     이 단일 소유. 본 모듈은 호출만 한다 (스팸 가드 이중화 금지).
 """
+
+from ctypes import create_string_buffer
 
 import tones
 
@@ -40,23 +64,50 @@ from .constants import SCOPE_APP, SCOPE_WINDOW
 # 사용자 조정 가능한 단일 SoT이며, matcher가 항상 settings.get()으로 주입한다.
 # 기본값 조정이 필요하면 settings.CONFSPEC의 default=... 한 곳만 고친다.
 
+# silence 버퍼 1ms당 바이트 수: tones.player가 stereo 16-bit @ 44100 Hz로 초기화됨
+# (`tones.py:21-31` initialize). 채널 2 × bytes_per_sample 2 × samplesPerSec / 1000.
+# 16-bit signed PCM zero-fill = 무음(Python `bytes(N)`이 zero 보장).
+_SILENCE_BYTES_PER_MS = tones.SAMPLE_RATE * 2 * 2 // 1000  # 176
 
-def _schedule_second_beep(freq: int, duration: int, gap_ms: int) -> None:
-    """gap_ms 뒤에 tones.beep 1회 예약.
 
-    NVDA `core.callLater`(core.py:1187-1202)는 `wx.GetApp() is None`일 때만
-    NVDANotInitializedError를 던지는데, GlobalPlugin이 실행되는 시점엔 wx.App이
-    반드시 존재하므로 실패 경로 없음. NVDA 자체(core.py:783, 975 등)도
-    이 함수를 try 없이 사용.
+def _play_two_tone_burst(a_freq: int, b_freq: int, duration: int, gap_ms: int) -> None:
+    """a + silence(gap_ms) + b를 한 번에 OS 오디오 큐에 enqueue.
 
-    상위 이벤트 훅(`__init__.py`의 event_* 3종)이 이미 try/except로 예외를
-    흡수하지만, 컨텍스트 마커 보존을 위해 여기서도 log.exception 한 겹만 유지.
+    1단계 — `tones.beep(a)` 호출. 내부에서 `player.stop()` + `player.feed(a_buf)`
+    실행. `decide_beep` 확장 포인트 통과.
+
+    2단계 — `tones.player.feed(silence + b_buf)` 직접 호출. `tones.beep`이
+    `player.stop()` 후 `feed(a_buf)`로 끝난 직후라 우리 feed는 stop 없이 큐에
+    append되어 OS 오디오 스택이 a → silence → b를 끊김 없이 연속 재생한다.
+
+    실패 시 기존 `core.callLater` 경로로 폴백해 동작 자체는 보존.
     """
+    if tones.player is None:
+        # NVDA 종료/재로드 직전 atexit이 player를 None 처리(`tones.py:39-42`).
+        return
+    tones.beep(a_freq, duration)
+    # decide_beep가 a를 취소했으면 b도 같이 차단 — 음소거/원격제어 핸들러 일관성.
+    # `tones.beep` 인자와 동일하게 left=50/right=50/isSpeechBeepCommand=False.
+    if not tones.decide_beep.decide(
+        hz=b_freq, length=duration, left=50, right=50, isSpeechBeepCommand=False,
+    ):
+        return
     try:
-        import core
-        core.callLater(gap_ms, tones.beep, freq, duration)
+        # generateBeep import는 매 호출마다지만 Python 모듈 캐시 hit이라 비용 ~μs.
+        # 모듈 로드 시점 일괄 import는 NVDAHelper 초기화 순서 의존이라 회피.
+        from NVDAHelper.localLib import generateBeep
+        silence_buf = bytes(gap_ms * _SILENCE_BYTES_PER_MS)
+        b_size = generateBeep(None, b_freq, duration, 50, 50)
+        b_buf = create_string_buffer(b_size)
+        generateBeep(b_buf, b_freq, duration, 50, 50)
+        tones.player.feed(silence_buf + b_buf.raw)
     except Exception:
-        log.exception("mtwn: second beep scheduling failed")
+        log.exception("mtwn: second beep enqueue failed; falling back to callLater")
+        try:
+            import core
+            core.callLater(gap_ms, tones.beep, b_freq, duration)
+        except Exception:
+            log.exception("mtwn: second beep callLater fallback also failed")
 
 
 def play_beep(
@@ -88,7 +139,7 @@ def play_beep(
         - tab_idx가 범위 밖이면 경고 로그 + 단음 fallback.
         - omit_app_beep=True + SCOPE_WINDOW + tab_idx: b 단음만 재생.
         - SCOPE_APP: app 비프 a 1회.
-        - SCOPE_WINDOW + tab_idx: a 즉시 재생 → `core.callLater(gap_ms, beep, b)`.
+        - SCOPE_WINDOW + tab_idx: `_play_two_tone_burst`로 a + silence + b 일괄 큐잉.
     """
     preset_id = settings.get("beepPreset")
     preset = presets.get_preset_or_classic(preset_id)
@@ -120,20 +171,23 @@ def play_beep(
         return
 
     effective_app_idx = app_idx % size
-    tones.beep(freqs[effective_app_idx], duration)
 
     # scope=app 또는 tab_idx 부재 → 단음 종료.
     if scope == SCOPE_APP or tab_idx is None:
+        tones.beep(freqs[effective_app_idx], duration)
         return
     if not isinstance(tab_idx, int):
         log.warning(
             f"mtwn: play_beep invalid tab_idx={tab_idx!r}, "
             f"falling back to single beep"
         )
+        tones.beep(freqs[effective_app_idx], duration)
         return
     effective_tab_idx = tab_idx % size
 
-    _schedule_second_beep(freqs[effective_tab_idx], duration, gap_ms)
+    _play_two_tone_burst(
+        freqs[effective_app_idx], freqs[effective_tab_idx], duration, gap_ms,
+    )
 
 
 def play_preview(preset_id: str, duration: int, gap_ms: int) -> None:
@@ -144,9 +198,9 @@ def play_preview(preset_id: str, duration: int, gap_ms: int) -> None:
         duration: 각 음 지속 시간(ms). 보통 settings["beepDuration"].
         gap_ms: 두 음 간격(ms). 보통 settings["beepGapMs"].
 
-    미리듣기는 실제 재생과 같은 경로를 써서 사용자가 실 사용 시의 소리를 그대로
-    듣게 한다. 미리듣기 vs 실제 매칭 경합 정책은 NVDA `core.callLater`의 기본
-    동작(이전 콜백 대체 없음)에 의존.
+    미리듣기는 실제 재생과 같은 경로(`_play_two_tone_burst`)를 써서 사용자가 실
+    사용 시의 소리를 그대로 듣게 한다. 미리듣기 vs 실제 매칭 경합은 OS 오디오
+    큐가 stop+feed 시 직전 큐를 자연 해체하는 기본 동작에 의존.
     """
     preset = presets.get_preset_or_classic(preset_id)
 
@@ -158,5 +212,4 @@ def play_preview(preset_id: str, duration: int, gap_ms: int) -> None:
     slot_b = max(0, min(size - 1, slot_b))
 
     freqs = preset["freqs"]
-    tones.beep(freqs[slot_a], duration)
-    _schedule_second_beep(freqs[slot_b], duration, gap_ms)
+    _play_two_tone_burst(freqs[slot_a], freqs[slot_b], duration, gap_ms)

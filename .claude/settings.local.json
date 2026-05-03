@@ -22,7 +22,8 @@
       "Bash(date > *)",
       "Bash(mv \"C:\\\\Users\\\\advck\\\\.claude\\\\plans\\\\iridescent-tickling-hickey.md\" \"C:\\\\Users\\\\advck\\\\.claude\\\\plans\\\\archive/\")",
       "Bash(mkdir -p \"C:\\\\Users\\\\advck\\\\.claude\\\\plans\\\\archive\")",
-      "Read(//c/Users/advck/.claude/plans/archive/**)"
+      "Read(//c/Users/advck/.claude/plans/archive/**)",
+      "Skill(codex-review)"
     ]
   }
 }

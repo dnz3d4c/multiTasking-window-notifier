@@ -177,7 +177,7 @@ multiTaskingWindowNotifier/
         ├── store.py                       # v9 JSON 저장소 단일 파일 (I/O + 비프 인덱스 할당 + 상태 파이프라인 + 공개 API 10개)
         ├── tabClasses.py                  # 앱별 editor/overlay window_class_name 매핑 (상수 조회 전용)
         ├── windowInfo.py                  # 창 정보·경로 헬퍼 (title normalize 적용)
-        ├── beepPlayer.py                  # 2음 비프 재생 조합 (tones.beep 단일 경로, core.callLater 2음 예약)
+        ├── beepPlayer.py                  # 2음 비프 재생 조합 (a는 tones.beep, b는 tones.player.feed PCM 큐잉)
         ├── listDialog.py                  # 목록 표시 wx.Dialog
         ├── settings.py                    # NVDA config 스키마 (confspec)
         ├── settingsPanel.py               # NVDA 설정 > 창 전환 알림 패널
@@ -309,9 +309,9 @@ DEFAULT_TAB_CLASSES = {
 - `BEEP_TABLE`: 35개 주파수 (C3 130Hz ~ B7 3951Hz, C major 온음계 7음 × 5옥타브). `BEEP_TABLE_SIZE` 상수로 노출. v7 이전은 반음 64음이었으나 인접 슬롯 변별이 약하다는 피드백으로 온음계로 교체 — 1번과 2번이 "도→레" 전음 간격으로 분리돼 명확히 구분된다.
 - `play_beep(app_idx, tab_idx=None, scope, duration, gap_ms, *, omit_app_beep=False)` — 2차원 비프.
   - scope=app 또는 tab_idx=None: `tones.beep(BEEP_TABLE[app_idx], duration)` 단음 1회.
-  - scope=window + tab_idx 지정: a 재생 → `core.callLater(gap_ms, tones.beep, b, duration)` 2음.
-  - `omit_app_beep=True` + scope=window + tab_idx 지정: a 생략 + b 단음 1회. 같은 앱 내부 탭 전환(eventRouter의 nameChange / app_overlay / editor 진입 경로) 전용. 호출 사슬은 eventRouter → `_match_and_beep(intra_app=True)` → `match_and_beep(intra_app=True)` → `play_beep(omit_app_beep=True)`. Alt+Tab 오버레이와 `event_foreground`(앱 간 전환)에서는 omit_app_beep=False라 2음 그대로.
-  - `_schedule_second_beep` 폴백 순서: core.callLater → wx.CallLater → 동기 호출.
+  - scope=window + tab_idx 지정: `_play_two_tone_burst`로 a + silence(gap_ms) + b를 OS 오디오 큐에 일괄 enqueue. 첫 a는 `tones.beep`(decide_beep 통과), 직후 `tones.decide_beep.decide(b)`로 b도 같은 결정 동기화 → `tones.player.feed(silence + b_buf)` 직접. NVDA 메인 스레드 freeze에도 a→b 100ms 정확.
+  - `omit_app_beep=True` + scope=window + tab_idx 지정: a 생략 + b 단음 1회 (`tones.beep` 단음 그대로). 같은 앱 내부 탭 전환(eventRouter의 nameChange / app_overlay / editor 진입 경로) 전용. 호출 사슬은 eventRouter → `_match_and_beep(intra_app=True)` → `match_and_beep(intra_app=True)` → `play_beep(omit_app_beep=True)`. Alt+Tab 오버레이와 `event_foreground`(앱 간 전환)에서는 omit_app_beep=False라 2음 burst 그대로.
+  - `_play_two_tone_burst` 폴백 — `NVDAHelper.localLib.generateBeep` import 실패 또는 `tones.player.feed` 예외 시 `core.callLater(gap_ms, tones.beep, b)` 회귀(무음 회귀 없음).
 - `_resolve_beep_pair(matched_key, scope, appId)`:
   - real_app_id = matched_key에서 splitKey로 추출 (Alt+Tab 오버레이 title 역매핑 호환).
   - app_idx = appBeepMap[real_app_id] (자동 할당 보장). tab_idx = entry.tabBeepIdx (scope=window만).
