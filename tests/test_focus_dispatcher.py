@@ -37,8 +37,8 @@ def captured_match(monkeypatch):
     """plugin._match_and_beep 호출 인자를 캡처하는 fake plugin + (appId, title, tab_signature) 리스트."""
     calls = []
     plugin = MagicMock()
-    plugin._match_and_beep = lambda appId, title, tab_signature=0: calls.append(
-        (appId, title, tab_signature)
+    plugin._match_and_beep = lambda appId, title, tab_signature=0, **kw: calls.append(
+        (appId, title, tab_signature, kw.get("intra_app", False))
     )
     return plugin, calls
 
@@ -93,10 +93,11 @@ def test_alt_tab_overlay_uses_obj_name(captured_match, mock_api, tab_classes_noo
 
     # normalize_title은 꼬리 " - Chrome"을 제거. match_appId는 "" (신뢰 불가 표시).
     assert len(calls) == 1
-    appId, title, tab_signature = calls[0]
+    appId, title, tab_signature, intra_app = calls[0]
     assert appId == ""  # Alt+Tab 분기: app_lookup 조회 억제용 빈 문자열
     assert title == "YouTube"
     assert tab_signature == 0xAAA  # alt_tab 분기는 obj.windowHandle
+    assert intra_app is False  # alt_tab 오버레이는 앱 간 미리듣기라 2음 유지
 
 
 def test_alt_tab_overlay_skipped_when_fg_not_shell_host(
@@ -135,10 +136,11 @@ def test_app_overlay_uses_obj_name(captured_match, mock_api, monkeypatch, debug_
     eventRouter.dispatch_focus(plugin, obj)
 
     assert len(calls) == 1
-    appId, title, tab_signature = calls[0]
+    appId, title, tab_signature, intra_app = calls[0]
     assert appId == "notepad++"
     assert title == "main.cpp"
     assert tab_signature == 0xC001  # overlay도 obj.windowHandle
+    assert intra_app is True  # app_overlay는 같은 앱 내부 탭 전환
 
 
 def test_editor_branch_uses_foreground_name(captured_match, mock_api, monkeypatch, debug_off):
@@ -162,11 +164,12 @@ def test_editor_branch_uses_foreground_name(captured_match, mock_api, monkeypatc
     eventRouter.dispatch_focus(plugin, obj)
 
     assert len(calls) == 1
-    appId, title, tab_signature = calls[0]
+    appId, title, tab_signature, intra_app = calls[0]
     assert appId == "notepad"
     assert title == "제목 없음"
     # editor 분기의 tab_signature는 obj(자식) hwnd. foreground.windowHandle 쓰면 여러 탭 구분 불가.
     assert tab_signature == 0xE001
+    assert intra_app is True  # editor 분기는 같은 앱 내부 탭 전환
 
 
 def test_editor_branch_chrome_ctrl_tab(captured_match, mock_api, monkeypatch, debug_off):
@@ -188,11 +191,12 @@ def test_editor_branch_chrome_ctrl_tab(captured_match, mock_api, monkeypatch, de
     eventRouter.dispatch_focus(plugin, obj)
 
     assert len(calls) == 1
-    appId, title, tab_signature = calls[0]
+    appId, title, tab_signature, intra_app = calls[0]
     assert appId == "chrome"
     assert title == "링키지랩"
     # editor 분기 불변: 자식(obj) hwnd를 tab_signature로. foreground hwnd 쓰면 탭 구분 불가.
     assert tab_signature == 0x7A01
+    assert intra_app is True  # editor 분기는 같은 앱 내부 탭 전환
 
 
 def test_editor_branch_skipped_when_child_wcn_equals_foreground_class_name(

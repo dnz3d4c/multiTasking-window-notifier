@@ -29,8 +29,8 @@ def captured_match():
     """plugin._match_and_beep 캡처."""
     calls = []
     plugin = MagicMock()
-    plugin._match_and_beep = lambda appId, title, tab_signature=0: calls.append(
-        (appId, title, tab_signature)
+    plugin._match_and_beep = lambda appId, title, tab_signature=0, **kw: calls.append(
+        (appId, title, tab_signature, kw.get("intra_app", False))
     )
     return plugin, calls
 
@@ -80,7 +80,8 @@ def test_obj_name_matches_foreground_name_triggers_match(captured_match, mock_ap
     eventRouter.handle_name_change(plugin, foreground)
 
     assert len(calls) == 1
-    appId, title, tab_signature = calls[0]
+    appId, title, tab_signature, intra_app = calls[0]
+    assert intra_app is True  # nameChange 경로는 정의상 같은 앱 내부 전환
     assert appId == "notepad++"
     # normalize_title이 꼬리 " - Notepad++"를 제거하는지와 무관하게, 위임 자체가
     # 일어났고 tab_signature가 obj.windowHandle이면 OK.
@@ -136,7 +137,7 @@ def test_tab_signature_uses_obj_hwnd(captured_match, mock_api, debug_off):
     eventRouter.handle_name_change(plugin, foreground)
 
     assert len(calls) == 1
-    _, _, tab_signature = calls[0]
+    _, _, tab_signature, _ = calls[0]
     assert tab_signature == 0x7777
 
 
@@ -189,6 +190,6 @@ def test_fg_identity_allows_match(captured_match, mock_api, debug_off):
     eventRouter.handle_name_change(plugin, foreground)
 
     assert len(calls) == 1
-    appId, _, tab_signature = calls[0]
+    appId, _, tab_signature, _ = calls[0]
     assert appId == "notepad++"
     assert tab_signature == 0xC200

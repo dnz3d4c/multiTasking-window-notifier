@@ -65,6 +65,8 @@ def play_beep(
     scope: str,
     duration: int,
     gap_ms: int,
+    *,
+    omit_app_beep: bool = False,
 ) -> None:
     """앱 비프 a + (옵션) 탭 비프 b 재생. 주파수는 현재 프리셋의 freqs에서 조회.
 
@@ -74,12 +76,17 @@ def play_beep(
         scope: SCOPE_APP 또는 SCOPE_WINDOW. scope=app이면 tab_idx 무시.
         duration: 각 음 지속 시간(ms).
         gap_ms: a 종료 후 b 시작까지 간격(ms).
+        omit_app_beep: 같은 앱 내부 탭 전환에서 호출자가 True를 주입. scope=WINDOW
+            + tab_idx 있음일 때만 발효 — a를 생략하고 b만 단음 재생. 다른 케이스
+            (scope=APP, tab_idx=None)에서는 무시되어 기본 단음 a가 그대로 재생됨
+            (무음 회귀 방지).
 
     동작:
         - 현재 프리셋(`settings.beepPreset`) 조회. 미지 id면 classic 폴백.
         - 프리셋의 `freqs`/`slotCount` 기준 범위 체크.
         - app_idx가 범위 밖이면 경고 로그 후 무음 (예외 없음).
         - tab_idx가 범위 밖이면 경고 로그 + 단음 fallback.
+        - omit_app_beep=True + SCOPE_WINDOW + tab_idx: b 단음만 재생.
         - SCOPE_APP: app 비프 a 1회.
         - SCOPE_WINDOW + tab_idx: a 즉시 재생 → `core.callLater(gap_ms, beep, b)`.
     """
@@ -97,9 +104,22 @@ def play_beep(
             f"for preset={preset['id']!r}"
         )
         return
-    effective_app_idx = app_idx % size
 
     freqs = preset["freqs"]
+
+    # 같은 앱 내부 탭 전환: a 생략 + b만 단음. tab_idx 유효성은 아래 SCOPE_WINDOW
+    # 분기와 동일한 검증 적용.
+    if omit_app_beep and scope == SCOPE_WINDOW and tab_idx is not None:
+        if not isinstance(tab_idx, int):
+            log.warning(
+                f"mtwn: play_beep invalid tab_idx={tab_idx!r} (intra-app), "
+                f"falling back to silence"
+            )
+            return
+        tones.beep(freqs[tab_idx % size], duration)
+        return
+
+    effective_app_idx = app_idx % size
     tones.beep(freqs[effective_app_idx], duration)
 
     # scope=app 또는 tab_idx 부재 → 단음 종료.

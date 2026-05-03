@@ -307,9 +307,10 @@ DEFAULT_TAB_CLASSES = {
 
 ### 비프음 테이블 / 재생 (v4 2차원, v7 온음계 전환)
 - `BEEP_TABLE`: 35개 주파수 (C3 130Hz ~ B7 3951Hz, C major 온음계 7음 × 5옥타브). `BEEP_TABLE_SIZE` 상수로 노출. v7 이전은 반음 64음이었으나 인접 슬롯 변별이 약하다는 피드백으로 온음계로 교체 — 1번과 2번이 "도→레" 전음 간격으로 분리돼 명확히 구분된다.
-- `play_beep(app_idx, tab_idx=None, scope, duration, gap_ms)` — 2차원 비프.
+- `play_beep(app_idx, tab_idx=None, scope, duration, gap_ms, *, omit_app_beep=False)` — 2차원 비프.
   - scope=app 또는 tab_idx=None: `tones.beep(BEEP_TABLE[app_idx], duration)` 단음 1회.
   - scope=window + tab_idx 지정: a 재생 → `core.callLater(gap_ms, tones.beep, b, duration)` 2음.
+  - `omit_app_beep=True` + scope=window + tab_idx 지정: a 생략 + b 단음 1회. 같은 앱 내부 탭 전환(eventRouter의 nameChange / app_overlay / editor 진입 경로) 전용. 호출 사슬은 eventRouter → `_match_and_beep(intra_app=True)` → `match_and_beep(intra_app=True)` → `play_beep(omit_app_beep=True)`. Alt+Tab 오버레이와 `event_foreground`(앱 간 전환)에서는 omit_app_beep=False라 2음 그대로.
   - `_schedule_second_beep` 폴백 순서: core.callLater → wx.CallLater → 동기 호출.
 - `_resolve_beep_pair(matched_key, scope, appId)`:
   - real_app_id = matched_key에서 splitKey로 추출 (Alt+Tab 오버레이 title 역매핑 호환).

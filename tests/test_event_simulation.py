@@ -79,7 +79,9 @@ def beep_calls(monkeypatch):
     calls = []
     monkeypatch.setattr(
         beepPlayer, "play_beep",
-        lambda app_idx, tab_idx=None, scope=None, **kw: calls.append((app_idx, tab_idx, scope)),
+        lambda app_idx, tab_idx=None, scope=None, **kw: calls.append(
+            (app_idx, tab_idx, scope, kw.get("omit_app_beep", False))
+        ),
     )
     return calls
 
@@ -133,6 +135,7 @@ def test_alt_tab_overlay_fires_beep_and_record(
 
     assert len(beep_calls) == 1
     assert record_calls == ["notepad|제목 없음"]
+    assert beep_calls[0][3] is False  # alt_tab 분기는 2음 유지
 
 
 def test_editor_branch_fires_beep_with_child_hwnd(
@@ -151,6 +154,7 @@ def test_editor_branch_fires_beep_with_child_hwnd(
 
     assert len(beep_calls) == 1
     assert record_calls == ["notepad|제목 없음"]
+    assert beep_calls[0][3] is True  # editor 분기는 같은 앱 내부 → b 단음
 
 
 def test_app_overlay_branch_fires_beep(
@@ -169,6 +173,7 @@ def test_app_overlay_branch_fires_beep(
 
     assert len(beep_calls) == 1
     assert record_calls == ["notepad++|main.cpp"]
+    assert beep_calls[0][3] is True  # app_overlay 분기는 같은 앱 내부 → b 단음
 
 
 def test_name_change_fires_beep_on_confirmed_tab(
@@ -183,6 +188,7 @@ def test_name_change_fires_beep_on_confirmed_tab(
 
     assert len(beep_calls) == 1
     assert record_calls == ["chrome|YouTube"]
+    assert beep_calls[0][3] is True  # nameChange는 정의상 같은 앱 내부 → b 단음
 
 
 def test_consecutive_identical_events_are_deduped(
@@ -309,6 +315,7 @@ def test_event_foreground_window_match_takes_priority_over_app(
     assert len(beep_calls) == 1
     assert beep_calls[0][2] == SCOPE_WINDOW
     assert record_calls == ["messenger|메인 채팅"]
+    assert beep_calls[0][3] is False  # foreground는 앱 간 전환 → 2음 유지
 
 
 def test_event_foreground_unregistered_app_no_beep(

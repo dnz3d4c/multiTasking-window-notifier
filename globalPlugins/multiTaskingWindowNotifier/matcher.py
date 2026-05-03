@@ -184,7 +184,7 @@ class Matcher:
             tab_idx = 0
         return app_idx, tab_idx
 
-    def match_and_beep(self, appId, title, tab_signature=0):
+    def match_and_beep(self, appId, title, tab_signature=0, *, intra_app=False):
         """공통 매칭 루틴. 이벤트 훅(event_gainFocus / event_nameChange)이
         매칭 소스를 결정한 뒤 호출.
 
@@ -201,6 +201,10 @@ class Matcher:
             tab_signature: 탭/창 구분용 이벤트 식별자(보통 obj.windowHandle). 시그니처
                 dedup sig에 포함되어 같은 (appId, title)이라도 다른 탭이면 통과
                 시킨다. 0은 hwnd 미확보 상태 — 탭 구분 없는 기존 동작과 동치.
+            intra_app: 같은 앱 내부 탭 전환 진입 경로(nameChange, app_overlay,
+                editor)에서 True. SCOPE_WINDOW 매칭 + tab_idx 있음일 때
+                play_beep에 omit_app_beep=True로 전달되어 a 생략 + b 단음 재생.
+                기본 False(이벤트 출처 명시 안 하면 기존 2음 동작).
         """
         plugin = self._plugin
         app_list = plugin.appList
@@ -266,7 +270,14 @@ class Matcher:
             and preset.get("suppressRepeat")
             and (now - self._last_match_time) < _SUPPRESS_REPEAT_SEC
         ):
-            tab_idx = None  # 단음 재생으로 억제
+            # intra_app 모드에서는 a 생략 + b 단음이 기본 재생인데, 여기서
+            # tab_idx=None으로 만들면 b가 죽고 a 단음이 살아나 의도와 정반대가 된다.
+            # 추가로 omit_app_beep 분기는 tab_idx is not None 게이트라 None 변환은
+            # "추가 억제가 음 자체를 죽이는" 결과(결국 SCOPE_APP 단음 a 1회). intra_app
+            # 모드에선 이미 b 단음으로 충분히 조용하므로 추가 억제 불필요.
+            # intra_app일 때만 억제 변환을 건너뛰어 b 단음을 그대로 재생.
+            if not intra_app:
+                tab_idx = None  # 단음 재생으로 억제
         elif (
             is_repeat
             and scope == SCOPE_WINDOW
@@ -297,6 +308,7 @@ class Matcher:
             app_idx, tab_idx, scope,
             duration=settings.get("beepDuration"),
             gap_ms=settings.get("beepGapMs"),
+            omit_app_beep=intra_app,
         )
         store.record_switch(plugin.appListFile, matched_key)
         plugin._notify_switch()

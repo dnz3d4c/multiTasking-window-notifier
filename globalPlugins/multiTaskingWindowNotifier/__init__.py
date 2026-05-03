@@ -186,9 +186,16 @@ class GlobalPlugin(ScriptsMixin, globalPluginHandler.GlobalPlugin):
 
     # ---- matcher 위임 ----
 
-    def _match_and_beep(self, appId, title, tab_signature=0):
-        """공통 매칭 루틴. 실제 로직은 Matcher.match_and_beep."""
-        self._matcher.match_and_beep(appId, title, tab_signature=tab_signature)
+    def _match_and_beep(self, appId, title, tab_signature=0, *, intra_app=False):
+        """공통 매칭 루틴. 실제 로직은 Matcher.match_and_beep.
+
+        intra_app=True는 같은 앱 내부 탭 전환(nameChange / app_overlay / editor)
+        진입 경로에서만 주입. 매칭이 SCOPE_WINDOW + tab_idx 있음이면 a 생략 + b
+        단음으로 재생된다.
+        """
+        self._matcher.match_and_beep(
+            appId, title, tab_signature=tab_signature, intra_app=intra_app
+        )
 
     # -------- 이벤트 훅 --------
 

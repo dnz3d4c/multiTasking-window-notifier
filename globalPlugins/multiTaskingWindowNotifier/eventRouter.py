@@ -133,7 +133,11 @@ def handle_name_change(plugin, obj) -> None:
             f"mtwn: DBG nameChange appId={appId!r} title={title!r} "
             f"tab_signature={tab_signature}"
         )
-    plugin._match_and_beep(appId, title, tab_signature=tab_signature)
+    # nameChange는 hwnd 변동 없이 foreground title만 갈리는 경로(Ctrl+Tab 등) →
+    # 정의상 같은 앱 내부 탭 전환. 위 obj_hwnd == foreground_window_handle 게이트가
+    # "최상위 창 본체 변경"만 통과시키므로 hwnd 동등성 = 같은 프로세스 = intra_app
+    # 등치 성립. intra_app=True로 a 생략 + b 단음 재생 유도.
+    plugin._match_and_beep(appId, title, tab_signature=tab_signature, intra_app=True)
 
 
 # ================================================================
@@ -173,11 +177,13 @@ def dispatch_focus(plugin, obj) -> None:
     match_source = _determine_match_source(obj, window_class_name, appId, foreground, foreground_class_name)
     if match_source is None:
         return
-    raw_title, tab_signature, match_appId = match_source
+    raw_title, tab_signature, match_appId, intra_app = match_source
     title = normalize_title(raw_title)
     if not title:
         return
-    plugin._match_and_beep(match_appId, title, tab_signature=tab_signature)
+    plugin._match_and_beep(
+        match_appId, title, tab_signature=tab_signature, intra_app=intra_app,
+    )
 
 
 def _log_focus_diag(obj) -> None:
@@ -214,11 +220,15 @@ def _log_focus_diag(obj) -> None:
 
 
 def _determine_match_source(obj, window_class_name, appId, foreground, foreground_class_name):
-    """3분기 판정. 매칭 대상이면 (raw_title, tab_signature, match_appId), 아니면 None.
+    """3분기 판정. 매칭 대상이면 (raw_title, tab_signature, match_appId, intra_app), 아니면 None.
 
     match_appId는 matcher에 넘길 **신뢰 가능한** appId. Alt+Tab 분기에서는
     obj.appId가 오버레이 호스트(='explorer')라 무의미하므로 빈 문자열로 내려
     app_lookup 조회를 스킵시킨다. 나머지 분기는 원래 appId 그대로.
+
+    intra_app은 "같은 앱 내부 탭 전환" 플래그. alt_tab 오버레이는 앱 간 미리듣기
+    경로라 False, app_overlay(Notepad++ MRU)와 editor(메모장 자식) 분기는 True.
+    matcher가 SCOPE_WINDOW 매칭 시 a 생략 + b 단음 재생 결정에 사용.
     """
     # Alt+Tab: obj.window_class_name(InputSite)은 UWP 공용이라 foreground.window_class_name(Xaml Shell 호스트)과 AND로
     # 묶어야 Win+B/트레이/알림센터 등 같은 껍데기를 쓰는 목록형 UI를 배제.
@@ -250,4 +260,5 @@ def _determine_match_source(obj, window_class_name, appId, foreground, foregroun
         tab_signature = 0
 
     match_appId = "" if in_alt_tab else appId
-    return raw_title, tab_signature, match_appId
+    intra_app = not in_alt_tab
+    return raw_title, tab_signature, match_appId, intra_app
