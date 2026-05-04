@@ -39,11 +39,25 @@ decide_beep 일관성:
     더 호출해 a/b 결정을 동기화한다 — 비프 음소거/원격 제어 핸들러가 a를 막으면 b도
     같이 막힌다.
 
+NVDA 버전 호환:
+    NVDA 2025.2(commit `26d7cf738`, 2025-02-21)에서 `NVDAHelper.py` 단일
+    모듈이 `NVDAHelper/` 패키지로 분리되며 generateBeep이 `NVDAHelper.localLib`
+    서브모듈로 이동했다. 그 이전(2019.3 ~ 2025.1.x)에서는 `from NVDAHelper
+    import generateBeep`이 정답. manifest minimumNVDAVersion=2019.3.0 약속
+    유지 위해 두 import 경로를 모두 시도한다. 최초 호출 시 1회 resolve해서
+    모듈 캐시(`_generate_beep_fn`)에 보관 — lookup 비용 0.
+
+    try 순서는 **신경로 우선**. 2025.2+의 `NVDAHelper.__init__.py`가 구경로
+    호환을 위해 `_deprecate.MovedSymbol`로 `generateBeep`을 backward-compat
+    re-export하는데, 호출 시마다 `log.warning(..., stack_info=True)`를
+    찍는다(`_deprecate.py:166-180`). 신경로를 먼저 시도해 2025.2+ 환경에서
+    이 deprecation warning을 회피한다.
+
 폴백:
-    `NVDAHelper.localLib.generateBeep` import 실패(NVDA 버전 호환) 또는
-    `tones.player`가 None(NVDA 종료/재로드 직전) 시 기존 `core.callLater`
-    경로로 회귀해 동작 자체는 보존한다. user-facing 영향은 callLater 회귀
-    (freeze 시 b 지연 가능)만이고 무음 회귀는 없다.
+    위 두 경로 모두 실패(미래 NVDA 구조 재변경) 또는 `tones.player`가
+    None(NVDA 종료/재로드 직전) 시 기존 `core.callLater` 경로로 회귀해
+    동작 자체는 보존한다. user-facing 영향은 callLater 회귀(freeze 시 b
+    지연 가능)만이고 무음 회귀는 없다.
 
 프리셋 폴백:
     미지 preset_id 조회 시 classic 폴백 + 경고는 `presets.get_preset_or_classic`
@@ -52,6 +66,7 @@ decide_beep 일관성:
 
 from ctypes import create_string_buffer
 
+import core
 import tones
 
 from logHandler import log
@@ -68,6 +83,48 @@ from .constants import SCOPE_APP, SCOPE_WINDOW
 # (`tones.py:21-31` initialize). 채널 2 × bytes_per_sample 2 × samplesPerSec / 1000.
 # 16-bit signed PCM zero-fill = 무음(Python `bytes(N)`이 zero 보장).
 _SILENCE_BYTES_PER_MS = tones.SAMPLE_RATE * 2 * 2 // 1000  # 176
+
+# generateBeep 함수 lazy resolve 캐시. 두 import 경로(NVDA 2025.2+ 신경로 /
+# 2025.1.x 이하 구경로)를 첫 호출 시 한 번만 시도하고 결과를 보관.
+# `_resolved`로 "아직 resolve 안 됨"과 "resolve 시도했으나 실패(None)"를 구분.
+_generate_beep_fn = None
+_generate_beep_resolved = False
+
+# `_play_two_tone_burst` 폴백 진입 1회 후 후속 발생은 debugWarning으로 격하.
+# 이유: resolve 실패 환경(미래 NVDA 호환 깨짐)에선 매 비프마다 폴백 → log.exception
+# 스팸으로 다른 진단 로그 가린다. 첫 발생 stack은 보존, 이후는 진단용 한 줄만.
+# `presets.get_preset_or_classic` 단일 소유 가드와 동일 컨벤션.
+_two_tone_fallback_logged = False
+
+
+def _resolve_generate_beep():
+    """NVDA 버전별 generateBeep import 경로를 한 번만 resolve해서 캐시.
+
+    NVDA 2025.2+: `NVDAHelper.localLib.generateBeep`
+    NVDA 2019.3 ~ 2025.1.x: `NVDAHelper.generateBeep`
+
+    둘 다 실패하면 None 캐시 → 호출자가 callLater 폴백으로 자연 회귀.
+    """
+    global _generate_beep_fn, _generate_beep_resolved
+    if _generate_beep_resolved:
+        return _generate_beep_fn
+    fn = None
+    try:
+        from NVDAHelper.localLib import generateBeep
+        fn = generateBeep
+    except ImportError:
+        try:
+            from NVDAHelper import generateBeep
+            fn = generateBeep
+        except ImportError:
+            log.warning(
+                "mtwn: generateBeep import failed on both NVDAHelper.localLib "
+                "(NVDA 2025.2+) and NVDAHelper (<= 2025.1.x); "
+                "two-tone burst will use callLater fallback"
+            )
+    _generate_beep_fn = fn
+    _generate_beep_resolved = True
+    return _generate_beep_fn
 
 
 def _play_two_tone_burst(a_freq: int, b_freq: int, duration: int, gap_ms: int) -> None:
@@ -93,18 +150,28 @@ def _play_two_tone_burst(a_freq: int, b_freq: int, duration: int, gap_ms: int) -
     ):
         return
     try:
-        # generateBeep import는 매 호출마다지만 Python 모듈 캐시 hit이라 비용 ~μs.
-        # 모듈 로드 시점 일괄 import는 NVDAHelper 초기화 순서 의존이라 회피.
-        from NVDAHelper.localLib import generateBeep
+        # generateBeep는 모듈 첫 호출 시 1회 resolve 후 캐시(NVDA 버전별 경로 차이).
+        generateBeep = _resolve_generate_beep()
+        if generateBeep is None:
+            raise RuntimeError("generateBeep unavailable on this NVDA version")
         silence_buf = bytes(gap_ms * _SILENCE_BYTES_PER_MS)
         b_size = generateBeep(None, b_freq, duration, 50, 50)
         b_buf = create_string_buffer(b_size)
         generateBeep(b_buf, b_freq, duration, 50, 50)
         tones.player.feed(silence_buf + b_buf.raw)
     except Exception:
-        log.exception("mtwn: second beep enqueue failed; falling back to callLater")
+        global _two_tone_fallback_logged
+        if not _two_tone_fallback_logged:
+            log.exception(
+                "mtwn: second beep enqueue failed; falling back to callLater "
+                "(further occurrences logged at debug)"
+            )
+            _two_tone_fallback_logged = True
+        else:
+            log.debugWarning(
+                "mtwn: second beep enqueue failed (suppressed; see earlier exception)"
+            )
         try:
-            import core
             core.callLater(gap_ms, tones.beep, b_freq, duration)
         except Exception:
             log.exception("mtwn: second beep callLater fallback also failed")
