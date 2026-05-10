@@ -46,6 +46,7 @@ for _name in [
     "config",
     "controlTypes",
     "appModuleHandler",
+    "core",
 ]:
     _mock_module(_name)
 

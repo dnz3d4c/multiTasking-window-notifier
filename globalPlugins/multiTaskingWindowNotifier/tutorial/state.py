@@ -7,10 +7,16 @@
 스키마와 default는 settings.CONFSPEC에서 단일 선언하고 settings.register()가
 live config에 기본값을 주입한다. 본 모듈은 조회/기록만 담당해 레이어를 얇게 유지.
 
-NVDA는 프로필 전환/종료 시점에 config.conf를 자동 flush하므로 `mark_`에서
-`config.conf.save()`를 명시 호출하지 않는다. 중간에 NVDA가 비정상 종료되면
-다음 부팅에서 다시 한 번 안내가 뜰 수 있는데, 이건 데이터 손상이 아니라
-"안내가 한 번 더 오는" 정도의 허용 가능한 회귀.
+`mark_tutorial_shown`은 메모리 갱신 직후 `config.conf.save()`를 명시 호출한다.
+NVDA의 종료 시 자동 저장(`config.saveOnExit`)은 `general.saveConfigurationOnExit`
+가 True일 때 정상 종료 경로에서만 동작하므로, 다음 환경에서는 디스크에 박히지
+않아 부팅마다 안내가 재노출되는 회귀가 생긴다:
+    - 사용자가 "Save configuration when exiting NVDA" 옵션을 끈 환경
+    - 시스템 셧다운/재부팅으로 NVDA가 강제 종료
+    - NVDA를 작업관리자로 종료
+    - 다른 plugin terminate 예외로 saveOnExit 호출 미도달 / NVDA 충돌
+
+1회성 플래그라 save() 비용은 무시 가능.
 """
 
 import config
@@ -46,9 +52,15 @@ def mark_tutorial_shown() -> None:
         2. tutorial.dialog.TutorialDialog EndModal 전부 — 완료/스킵/try_now/Escape
 
     예외는 삼키고 log만 — 기록 실패가 다른 Phase의 이벤트 훅을 막으면 비프
-    기능 자체가 회귀하는 게 더 큰 손해.
+    기능 자체가 회귀하는 게 더 큰 손해. save() 실패도 흡수 — 디스크 미반영만
+    되고 메모리 갱신은 유효하므로 같은 NVDA 세션 내 중복 노출은 차단된다.
     """
     try:
         config.conf[ADDON_NAME]["tutorialShown"] = True
     except Exception:
         log.exception("mtwn: tutorialShown write failed")
+        return
+    try:
+        config.conf.save()
+    except Exception:
+        log.exception("mtwn: tutorialShown save failed")
