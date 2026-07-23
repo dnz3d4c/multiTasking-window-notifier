@@ -1,28 +1,7 @@
 {
   "permissions": {
     "allow": [
-      "Bash(uv run *)",
-      "Bash(echo \"exit=$?\")",
-      "Bash(touch .claude/last-review.txt)",
-      "Read(//c/project/nvda-addons/multiTaskingWindowNotifier/**)",
-      "Bash(mkdir -p .claude)",
-      "Bash(date)",
       "Skill(update-config)",
-      "Edit",
-      "Write",
-      "Bash(git add:*)",
-      "Bash(git commit:*)",
-      "Bash(git status)",
-      "Bash(git status:*)",
-      "Bash(git diff:*)",
-      "Bash(git log:*)",
-      "Bash(git show:*)",
-      "Bash(git checkout:*)",
-      "Bash(date > .claude/last-review.txt)",
-      "Bash(date > *)",
-      "Bash(mv \"C:\\\\Users\\\\advck\\\\.claude\\\\plans\\\\iridescent-tickling-hickey.md\" \"C:\\\\Users\\\\advck\\\\.claude\\\\plans\\\\archive/\")",
-      "Bash(mkdir -p \"C:\\\\Users\\\\advck\\\\.claude\\\\plans\\\\archive\")",
-      "Read(//c/Users/advck/.claude/plans/archive/**)",
       "Skill(codex-review)"
     ]
   }

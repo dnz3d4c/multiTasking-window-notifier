@@ -1,12 +1,4 @@
 {
-  "permissions": {
-    "allow": [
-      "Bash(uv run python build.py)",
-      "Bash(uv run pytest)",
-      "Bash(uv run pytest *)",
-      "Bash(date > .claude/last-review.txt)"
-    ]
-  },
   "hooks": {
     "Stop": [
       {
@@ -19,5 +11,8 @@
         ]
       }
     ]
+  },
+  "env": {
+    "PONYTAIL_DEFAULT_MODE": "full"
   }
 }
